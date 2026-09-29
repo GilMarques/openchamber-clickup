@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        box-sizing: border-box;
+      }
+      .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px 4px;
+      }
+      .title {
+        font-weight: 600;
+        font-size: 13px;
+      }
+      .sub {
+        padding: 0 12px 8px;
+        font-size: 11px;
+        color: var(--oc-muted, inherit);
+      }
+      .tools {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 0 12px 8px;
+      }
+      .content {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0 6px 12px;
+      }
+      .group {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 12px 12px 2px;
+      }
+      .group-name {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--oc-muted, inherit);
+      }
+      .group-count {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--oc-muted, inherit);
+      }
+      .cu-list,
+      .cu-children {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .cu-children[hidden] {
+        display: none;
+      }
+      .cu-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px 6px calc(8px + var(--cu-indent, 0px));
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .cu-row:hover {
+        background: var(--oc-hover, transparent);
+      }
+      .cu-row:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--oc-focus, currentColor);
+      }
+      .cu-caret {
+        flex: 0 0 auto;
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: none;
+        color: var(--oc-muted, inherit);
+        font-size: 10px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .cu-caret:hover {
+        background: var(--oc-active, transparent);
+      }
+      .cu-caret-spacer {
+        flex: 0 0 auto;
+        width: 16px;
+      }
+      .cu-main {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .cu-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cu-sub {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 0.75rem;
+        color: var(--oc-muted, inherit);
+      }
+      .cu-meta {
+        flex: 0 0 auto;
+        font-size: 0.75rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--oc-muted, inherit);
+      }
+      .cu-badge {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 9999px;
+        font-size: 11px;
+        font-weight: 500;
+        line-height: 16px;
+        white-space: nowrap;
+        background: var(--oc-hover, transparent);
+        color: var(--oc-muted, inherit);
+      }
+      .cu-badge[data-tone="error"] {
+        color: var(--oc-error-text, var(--oc-error));
+        background: color-mix(in srgb, var(--oc-error) 15%, transparent);
+      }
+      .cu-badge[data-tone="warning"] {
+        color: var(--oc-warning-text, var(--oc-warning));
+        background: color-mix(in srgb, var(--oc-warning) 15%, transparent);
+      }
+      .cu-badge[data-tone="info"] {
+        color: var(--oc-info-text, var(--oc-info));
+        background: color-mix(in srgb, var(--oc-info) 15%, transparent);
+      }
+      .cu-badge[data-tone="success"] {
+        color: var(--oc-success-text, var(--oc-success));
+        background: color-mix(in srgb, var(--oc-success) 15%, transparent);
+      }
+      .cu-badge[data-tone="primary"] {
+        color: var(--oc-primary-text, var(--oc-primary));
+        background: color-mix(in srgb, var(--oc-primary) 15%, transparent);
+      }
+      .cu-status {
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="main.js"></script>
+  </body>
+</html>
