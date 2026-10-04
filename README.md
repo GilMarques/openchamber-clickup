@@ -207,20 +207,24 @@ Notes are plain text — write markdown in the note editor and the **ClickUp
 Notes** page (Extension pages menu) renders it: headings, lists, code, quotes,
 links, tables. It needs no extra permission.
 
-### Why not the Files panel?
+### The Files panel, and the `files-nav` companion
 
-Research on OpenChamber 2.0.2 (this repo's SDK):
+There is no API for an extension to make OpenChamber open a file, and
+`contributes.fileEditors` only exists from OpenChamber 2.0.4. The working
+composition is:
 
-- The guest API has **no "open file" call** — only `openCommit` (Diff view) and
-  `openUrl`. So an extension cannot make the Files panel open a file.
-- `contributes.fileEditors` (an extension-provided editor inside Files) landed
-  in the SDK **after** 2.0.2; it is absent from the 2.0.2 manifest.
-- `contributes.page`, which this uses, is the supported way to get a full-screen
-  tab in the main area.
+1. Click **Export** on the ClickUp Notes page. It writes every note to
+   `~/clickup-notes.md` — the extension's only grant outside the project
+   (`filesystem: ["~/clickup-notes.md"]`), approved on first use.
+2. Install the MIT-licensed companion
+   [openchamber-files-ext](https://github.com/PylotLight/openchamber-files-ext)
+   (`files-nav`). Its Files panel can browse `~` (Home toggle) and opens the
+   export in a CodeMirror markdown editor with highlighting, tabs, and Save.
 
-So the markdown tab is ours rather than the Files viewer. On OpenChamber 2.0.4+
-we could also register a `fileEditors` entry for a notes `.md` file so it opens
-your editor from Files; the file would still need to exist in the project.
+The export is one-way; edits made in that file are not read back into notes. We
+deliberately do **not** submodule `files-nav`: it is a standalone extension
+(CodeMirror plus its own tree/tab shell, ~950 KB bundle and ~2 MB of data), not a
+reusable viewer component.
 
 ## Develop
 

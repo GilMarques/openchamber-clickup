@@ -2826,8 +2826,9 @@ Please report this to https://github.com/markedjs/marked.`, e) {
   count.className = "count";
   var spacer = document.createElement("div");
   spacer.className = "spacer";
+  var exportHost = document.createElement("div");
   var refreshHost = document.createElement("div");
-  bar.append(title, count, spacer, refreshHost);
+  bar.append(title, count, spacer, exportHost, refreshHost);
   var content = document.createElement("div");
   content.className = "content";
   root.append(bar, content);
@@ -2976,6 +2977,63 @@ Please report this to https://github.com/markedjs/marked.`, e) {
     variant: "secondary",
     size: "sm",
     onClick: () => void render()
+  });
+  var EXPORT_PATH = "~/clickup-notes.md";
+  var exportButton = null;
+  var exportNotes = async () => {
+    exportButton?.update({ loading: true, disabled: true });
+    try {
+      const [notes, lastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
+      let tasks = /* @__PURE__ */ new Map();
+      try {
+        tasks = await loadTasks();
+      } catch {
+      }
+      const ids = Object.keys(notes).sort(
+        (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b)
+      );
+      const lines = [
+        "# ClickUp Notes",
+        "",
+        `_${ids.length} note${ids.length === 1 ? "" : "s"} \xB7 exported ${(/* @__PURE__ */ new Date()).toLocaleString()} \xB7 local to OpenChamber, never sent to ClickUp_`,
+        ""
+      ];
+      for (const taskId of ids) {
+        const task = tasks.get(taskId);
+        const url = task?.url ?? `https://app.clickup.com/t/${taskId}`;
+        const title2 = task?.name ?? taskId;
+        const meta = task ? [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name].filter(Boolean).join(" \xB7 ") : "";
+        lines.push(
+          `## ${title2}`,
+          "",
+          `[${taskId}](${url})${meta ? ` \xB7 ${meta}` : ""}${lastNoteAt[taskId] ? ` \xB7 saved ${new Date(lastNoteAt[taskId]).toLocaleString()}` : ""}`,
+          "",
+          notes[taskId],
+          "",
+          "---",
+          ""
+        );
+      }
+      await host.writeFile(EXPORT_PATH, lines.join("\n"));
+      await host.toast({
+        kind: "success",
+        message: `Notes exported to ${EXPORT_PATH}`,
+        copy: { text: EXPORT_PATH }
+      });
+    } catch (error) {
+      await host.toast({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      exportButton?.update({ loading: false, disabled: false });
+    }
+  };
+  exportButton = mountButton(exportHost, {
+    label: "Export",
+    variant: "secondary",
+    size: "sm",
+    onClick: () => void exportNotes()
   });
   host.onReady((ctx) => {
     applyHostReady(ctx, document.documentElement);

@@ -83,7 +83,10 @@ The panel also re-reads on a forced refresh (the refresh icon).
   priority badge, expandable subtasks, a done checkbox, and a note icon that
   turns solid when a note exists.
 - The Files panel cannot be driven: the guest API has no "open file" call in
-  OpenChamber 2.0.2, and `contributes.fileEditors` only exists from 2.0.4. Use
-  the ClickUp Notes page instead.
+  OpenChamber 2.0.2, and `contributes.fileEditors` only exists from 2.0.4. The
+  ClickUp Notes page has an **Export** button that writes `~/clickup-notes.md`
+  (the extension's one outside-project grant); install the MIT companion
+  `PylotLight/openchamber-files-ext` to browse and edit that file in CodeMirror.
+  The export is one-way.
 - Source, docs, and the same CLI/MCP live in the repo
   `github.com/GilMarques/openchamber-clickup`.
