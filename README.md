@@ -74,8 +74,9 @@ Two more optional fields tune the grouping: **Folder that holds your frentes**
 - The table loads **all** your assigned tasks. OpenChamber caps each extension
   request at 256 KB and one ClickUp page is far larger, so the panel splits the
   query by `date_updated` ranges and fetches each piece, merging by task id
-  instead of parsing one truncated response. It sorts by due date; tasks without
-  a due date come last.
+  instead of parsing one truncated response. Rows are **ordered by sprint**
+  (Sprint 01, 02, …; unnumbered sprints and tasks with no sprint come last, then
+  by due date and name).
 - Rows are **grouped by frente**. A task is treated as a frente task when its
   folder is the one named by the `frente-folder` setting (default `Frentes`);
   then the group is its list (for example `Solibri Rules`) and the sub-label is

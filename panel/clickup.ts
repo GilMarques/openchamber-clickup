@@ -246,3 +246,34 @@ export const buildTree = (tasks: ClickUpTask[]): TreeNode[] => {
   });
   return roots.map((task) => build(task, 0));
 };
+
+/** The sprint a task sits in: its sprint field for frente tasks, else its list. */
+export const sprintLabel = (task: ClickUpTask, frenteFolder: string, sprintField: string): string =>
+  (
+    (isFrenteTask(task, frenteFolder) ? resolveCustomField(task, sprintField) : task.list?.name) ?? ""
+  ).trim();
+
+type SprintKey = { rank: number; label: string };
+
+const sprintKey = (task: ClickUpTask, frenteFolder: string, sprintField: string): SprintKey => {
+  const label = sprintLabel(task, frenteFolder, sprintField);
+  const numbered = /^sprint\s*0*(\d+)/i.exec(label);
+  if (numbered) return { rank: Number(numbered[1]), label };
+  // "Sprint" or "Sprint Bugs …" sort after numbered sprints.
+  if (/^sprint\b/i.test(label)) return { rank: Number.MAX_SAFE_INTEGER, label };
+  return { rank: Number.POSITIVE_INFINITY, label };
+};
+
+/** Order by sprint (01, 02, …; unnumbered last), then by due date and name. */
+export const compareBySprint = (
+  a: ClickUpTask,
+  b: ClickUpTask,
+  frenteFolder: string,
+  sprintField: string,
+): number => {
+  const left = sprintKey(a, frenteFolder, sprintField);
+  const right = sprintKey(b, frenteFolder, sprintField);
+  if (left.rank !== right.rank) return left.rank < right.rank ? -1 : 1;
+  if (left.label !== right.label) return left.label.localeCompare(right.label);
+  return byDueDate(a, b);
+};

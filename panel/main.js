@@ -1768,6 +1768,21 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     });
     return roots.map((task) => build(task, 0));
   };
+  var sprintLabel = (task, frenteFolder2, sprintField2) => ((isFrenteTask(task, frenteFolder2) ? resolveCustomField(task, sprintField2) : task.list?.name) ?? "").trim();
+  var sprintKey = (task, frenteFolder2, sprintField2) => {
+    const label = sprintLabel(task, frenteFolder2, sprintField2);
+    const numbered = /^sprint\s*0*(\d+)/i.exec(label);
+    if (numbered) return { rank: Number(numbered[1]), label };
+    if (/^sprint\b/i.test(label)) return { rank: Number.MAX_SAFE_INTEGER, label };
+    return { rank: Number.POSITIVE_INFINITY, label };
+  };
+  var compareBySprint = (a, b, frenteFolder2, sprintField2) => {
+    const left = sprintKey(a, frenteFolder2, sprintField2);
+    const right = sprintKey(b, frenteFolder2, sprintField2);
+    if (left.rank !== right.rank) return left.rank < right.rank ? -1 : 1;
+    if (left.label !== right.label) return left.label.localeCompare(right.label);
+    return byDueDate(a, b);
+  };
 
   // panel/main.ts
   var host = connectHost();
@@ -1978,7 +1993,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     frenteTabs?.update({ items, activeId: state.frenteFilter ? `f:${state.frenteFilter}` : "all" });
   };
   var collapsed = /* @__PURE__ */ new Set();
-  var rowSubtitle = (task, frente) => (isFrenteTask(task, frente) ? resolveCustomField(task, sprintField()) : task.list?.name) ?? void 0;
+  var rowSubtitle = (task, frente) => sprintLabel(task, frente, sprintField()) || void 0;
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
     if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -2118,8 +2133,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       );
       return;
     }
-    const tasks = visibleTasks();
     const frente = frenteFolder();
+    const tasks = [...visibleTasks()].sort((a, b) => compareBySprint(a, b, frente, sprintField()));
     renderFrenteTabs(tasks, frente);
     if (tasks.length === 0) {
       active2.push(

@@ -9,8 +9,10 @@ import { readFileSync } from "node:fs";
 import {
   buildGroups,
   buildTree,
+  compareBySprint,
   fetchAssignedTasks,
   isClosed,
+  sprintLabel,
   RESPONSE_MAX,
   type ClickUpRequest,
   type TreeNode,
@@ -92,6 +94,13 @@ console.log(
   "\nfrente tabs: " +
     ["All", ...frentes.map((group) => `${group.label} (${group.tasks.length})`)].join("  |  "),
 );
+
+const ordered = [...viaPanel].sort((a, b) => compareBySprint(a, b, "Frentes", "Sprints"));
+const solibri = ordered.filter((task) => task.project?.name === "Frentes");
+console.log("\nSolibri Rules order (by sprint):");
+for (const task of solibri) {
+  console.log(`  ${sprintLabel(task, "Frentes", "Sprints") || "(no sprint)"} — ${task.name}`);
+}
 
 const countNodes = (nodes: TreeNode[]): number =>
   nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);

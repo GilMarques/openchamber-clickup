@@ -19,11 +19,12 @@ import type { ButtonHandle, TabsHandle, Tone } from "@openchamber/sdk/ui";
 import {
   buildGroups,
   buildTree,
+  compareBySprint,
   fetchAssignedTasks,
   isClosed,
-  isFrenteTask,
   resolveCustomField,
   shortId,
+  sprintLabel,
   taskFolder,
   REJECTED_TOKEN,
   RESPONSE_MAX,
@@ -301,7 +302,7 @@ const renderFrenteTabs = (tasks: ClickUpTask[], frente: string): void => {
 const collapsed = new Set<string>();
 
 const rowSubtitle = (task: ClickUpTask, frente: string): string | undefined =>
-  (isFrenteTask(task, frente) ? resolveCustomField(task, sprintField()) : task.list?.name) ?? undefined;
+  sprintLabel(task, frente, sprintField()) || undefined;
 
 const statusTone = (status: string, type: string | undefined): Tone => {
   const value = status.toLowerCase();
@@ -453,8 +454,8 @@ const renderContent = () => {
     );
     return;
   }
-  const tasks = visibleTasks();
   const frente = frenteFolder();
+  const tasks = [...visibleTasks()].sort((a, b) => compareBySprint(a, b, frente, sprintField()));
   renderFrenteTabs(tasks, frente);
   if (tasks.length === 0) {
     active.push(
