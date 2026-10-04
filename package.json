@@ -1,6 +1,6 @@
 {
   "name": "openchamber-clickup-tasks",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "OpenChamber extension: your assigned ClickUp tasks in a simple table.",
   "openchamber": {
@@ -16,6 +16,13 @@
         "entry": "panel/index.html"
       },
       "attach": "panel",
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {
+          "exec": ["xdg-open"]
+        }
+      },
       "filesystem": [
         "~/Documents/obsidian/ClickUp/**"
       ],

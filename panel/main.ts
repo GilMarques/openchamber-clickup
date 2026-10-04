@@ -457,7 +457,9 @@ const migrateStorageNotes = async (): Promise<void> => {
   }
 };
 
-/** Ensure the note file exists (creating it from a template), then hand it to Obsidian. */
+/** Ensure the note file exists, then open it in Obsidian through the
+ * extension's local service (which runs unsandboxed and can launch apps).
+ * Falls back to a copyable vault path when the service is unavailable. */
 const openInObsidian = (task: ClickUpTask): void => {
   void (async () => {
     const path = notePath(task.id);
@@ -477,11 +479,50 @@ const openInObsidian = (task: ClickUpTask): void => {
       renderContent();
       await recordEvent("note-set", task.id);
     }
-    await host.toast({
-      kind: "success",
-      message: `Note ready in your Obsidian vault: ClickUp/${noteFileName(task.id)}`,
-      copy: { text: path },
-    });
+    let answer: { status: number; body: string };
+    try {
+      answer = await host.serviceRequest({
+        method: "POST",
+        path: "/open",
+        body: JSON.stringify({ dir: notesDir(), taskId: task.id }),
+      });
+    } catch (error) {
+      const code = error instanceof HostRequestError ? error.code : undefined;
+      await host.toast({
+        kind: code === "NO_SERVICE" ? "info" : "error",
+        message:
+          code === "NO_SERVICE"
+            ? `Approve the local service in Settings → Extensions, then click again. Note file: ${path}`
+            : error instanceof Error
+              ? error.message
+              : String(error),
+        copy: { text: path },
+      });
+      return;
+    }
+    if (answer.status !== 200) {
+      await host.toast({
+        kind: "error",
+        message: `Obsidian launcher answered ${answer.status}. Note file: ${path}`,
+        copy: { text: path },
+      });
+      return;
+    }
+    let opened = false;
+    try {
+      opened = Boolean((JSON.parse(answer.body) as { ok?: boolean }).ok);
+    } catch {
+      opened = false;
+    }
+    if (!opened) {
+      await host.toast({
+        kind: "error",
+        message: `Obsidian did not open. Note file: ${path}`,
+        copy: { text: path },
+      });
+      return;
+    }
+    await host.toast({ kind: "success", message: `Opened ${noteFileName(task.id)} in Obsidian.` });
   })();
 };
 

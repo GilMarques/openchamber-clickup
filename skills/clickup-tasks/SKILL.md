@@ -85,11 +85,11 @@ The panel also re-reads on a forced refresh (the refresh icon).
 
 - Notes are **markdown files in the Obsidian vault**
   (`~/Documents/obsidian/ClickUp/<taskId>.md`): header plus body. Keep
-  agent-written bodies markdown. The extension has no editor anymore — Obsidian
-  is the editor, launched via the `note_open` tool or
-  `state.mjs note-open <taskId>` (`xdg-open obsidian://open?path=…`). The rail
-  panel cannot launch outside apps (guest `open-url` is `http(s)`-only), so its
-  note icon only ensures the file exists and toasts the vault path.
+  agent-written bodies markdown. The extension has no editor — clicking a task's
+  note icon opens the file **directly in Obsidian** through the extension's local
+  service (`service/main.js`, `POST /open`, scoped to the home folder). The rail
+  panel cannot launch outside apps itself (guest `open-url` is `http(s)`-only),
+  and `note_open` / `state.mjs note-open` do the same from an agent or shell.
 - The panel groups by frente, orders by sprint, shows a workflow-status dot, a
   priority badge, expandable subtasks, a done checkbox, and a note icon that
   turns solid when a note file exists.

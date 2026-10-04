@@ -32,9 +32,11 @@ reaches the extension page. The only OpenChamber capability it requests is the
   title. Ticks are per calendar day in your local time; the last 60 days are
   kept, so a new day starts unticked.
 - A **local note** on each task, kept as a markdown file in your Obsidian vault
-  (`~/Documents/obsidian/ClickUp/<taskId>.md`). Click the note icon and the file
-  is created if needed; the icon turns **solid** once a note exists. Notes are
-  **never sent to ClickUp**, so pasted AI text stays out of your workspace.
+  (`~/Documents/obsidian/ClickUp/<taskId>.md`). Click the note icon and the note
+  opens **directly in Obsidian** — the extension runs a tiny local service that
+  launches it (created if missing). The icon turns **solid** once a note exists.
+  Notes are **never sent to ClickUp**, so pasted AI text stays out of your
+  workspace.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible
@@ -91,10 +93,14 @@ refresh. The file starts with a header (task title, link, sprint, status, list)
 followed by your text; agent-written notes keep the same shape.
 
 - **Click the note icon** on a row: the file is created from a template when
-  missing, and a toast confirms the vault path (with a Copy button).
-- **To open it in Obsidian**, ask the agent (`note_open` tool) or run
-  `node scripts/state.mjs note-open <taskId>` — the panel itself cannot launch
-  outside apps (OpenChamber only lets extensions open `http(s)` URLs).
+  missing, then opened **directly in Obsidian** through the extension's local
+  service (approve it once in Settings → Extensions — it runs unsandboxed with
+  your user rights, like every OpenChamber service, and only launches note files
+  inside your home folder). If the service isn't approved yet, the toast carries
+  a Copy button with the vault path instead.
+- **To open it in Obsidian**, click the note icon (local service launches it),
+  ask the agent (`note_open` tool), or run `node scripts/state.mjs note-open
+  <taskId>`.
 
 ## Using it
 
@@ -218,7 +224,7 @@ without re-pasting. Prefer local notes/ticks so AI text never lands in ClickUp.
 `skills/clickup-tasks/SKILL.md` documents this contract for agent sessions; it is
 symlinked into `~/.config/opencode/skills/clickup-tasks`.
 
-### Notes are vault files, edited in Obsidian
+### Notes open directly in Obsidian
 
 There is deliberately no editor in the extension anymore: no CodeMirror, no
 markdown renderer, no notes tab. A note is `<taskId>.md` in the notes folder,
@@ -227,11 +233,12 @@ The panel only ensures the file exists and shows whether it does; Obsidian does
 the editing. The extension requests exactly one outside-project grant for this:
 `filesystem: ["~/Documents/obsidian/ClickUp/**"]`.
 
-Why not open Obsidian from the panel? OpenChamber only lets extensions open
-`http(s)` URLs (`host-bridge.ts` rejects anything else, and the guest iframe is
-`sandbox="allow-scripts"` with no top-navigation), while `obsidian://` links are
-classified as app links elsewhere in the app. So launching runs through the
-local MCP/CLI (`xdg-open obsidian://open?path=…`), which have full user rights.
+Opening works through a **local service** (`service/main.js`, plain Node, no
+dependencies): the panel calls it via `host.serviceRequest`, and it runs
+`xdg-open obsidian://open?path=…`. The sandboxed panel cannot launch apps
+itself — guest `open-url` is `http(s)`-only and its iframe has no
+top-navigation — so the service (unsandboxed, approved once, scoped to files
+inside your home folder) is the piece that makes one click open Obsidian.
 
 ## Develop
 
@@ -258,8 +265,9 @@ change. A folder install only needs a reload to pick up a rebuilt `main.js`.
   one huge, truncated response.
 - The panel reads the API on open, on connection, on workspace-setting change,
   and when you press **Refresh**; it does not poll in the background.
-- Only one OpenChamber capability is requested: `filesystem` for
-  `~/Documents/obsidian/ClickUp/**`, so note files live in your Obsidian vault.
-  The extension can draw its panel, read the current session, attach chips, and
-  read/write those files — but it cannot send prompts or launch outside apps on
-  its own (opening a note in Obsidian goes through the local MCP/CLI).
+- Only two OpenChamber capabilities are requested: `filesystem` for
+  `~/Documents/obsidian/ClickUp/**`, so note files live in your Obsidian vault,
+  and `service` for the local Obsidian launcher (approved once; it runs
+  unsandboxed with your user rights and only opens note files inside your home
+  folder). The extension can draw its panel, read the current session, attach
+  chips, and read/write those files — but it cannot send prompts on its own.
