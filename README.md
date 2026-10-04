@@ -25,6 +25,11 @@ install prompt has nothing to approve.
 - A **Frentes filter row** under the Open/All tabs: `All` plus one tab per
   frente (with task counts). Pick a frente to show only its tasks; the tabs
   update with the Open/All and search filters.
+- A **local checkbox** on each row to tick off what you did that day. It is
+  stored on the OpenChamber server in the extension's own storage (key `done`)
+  and **does not change anything in ClickUp**. Checked rows get a struck-through
+  title. Ticks are per calendar day in your local time; the last 60 days are
+  kept, so a new day starts unticked.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible

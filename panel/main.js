@@ -1444,6 +1444,49 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     return target?.id ?? null;
   };
 
+  // node_modules/@openchamber/sdk/dist/ui/checkbox.js
+  var mountToggle = (root2, initial, role) => {
+    ensureStyle(UI_CSS);
+    let props = initial;
+    const node = button("oc-sdk oc-sdk-check");
+    node.setAttribute("role", role);
+    const control = el("span", role === "switch" ? "oc-sdk-check-thumb" : "oc-sdk-check-box");
+    if (role === "checkbox") {
+      control.append(icon("check", 12));
+    }
+    const text = el("span", "oc-sdk-check-text");
+    const label = el("span", "oc-sdk-check-label");
+    const description = el("span", "oc-sdk-check-desc");
+    text.append(label, description);
+    node.append(control, text);
+    root2.append(node);
+    const paint = () => {
+      node.setAttribute("aria-checked", props.checked ? "true" : "false");
+      node.disabled = Boolean(props.disabled);
+      setText(label, props.label);
+      setText(description, props.description);
+      description.hidden = !props.description;
+    };
+    const onClick = () => {
+      if (!props.disabled) {
+        props.onChange(!props.checked);
+      }
+    };
+    node.addEventListener("click", onClick);
+    paint();
+    return {
+      update: (next) => {
+        props = { ...props, ...next };
+        paint();
+      },
+      dispose: () => {
+        node.removeEventListener("click", onClick);
+        node.remove();
+      }
+    };
+  };
+  var mountCheckbox = (root2, initial) => mountToggle(root2, initial, "checkbox");
+
   // node_modules/@openchamber/sdk/dist/ui/tabs.js
   var mountTabs = (root2, initial) => {
     ensureStyle(UI_CSS);
@@ -1993,6 +2036,47 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     frenteTabs?.update({ items, activeId: state.frenteFilter ? `f:${state.frenteFilter}` : "all" });
   };
   var collapsed = /* @__PURE__ */ new Set();
+  var localDateKey = () => {
+    const now = /* @__PURE__ */ new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  };
+  var parseDone = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const out = {};
+    for (const [date, ids] of Object.entries(value)) {
+      if (Array.isArray(ids)) out[date] = ids.filter((id) => typeof id === "string");
+    }
+    return out;
+  };
+  var doneByDate = {};
+  var doneToday = /* @__PURE__ */ new Set();
+  var todayKey = localDateKey();
+  var doneLoaded = false;
+  var readDone = async () => {
+    if (!doneLoaded) {
+      try {
+        doneByDate = parseDone(await host.storage.get("done"));
+      } catch {
+        doneByDate = {};
+      }
+      doneLoaded = true;
+    }
+    todayKey = localDateKey();
+    doneToday = new Set(doneByDate[todayKey] ?? []);
+  };
+  var persistDone = async () => {
+    doneByDate[todayKey] = [...doneToday];
+    const kept = {};
+    for (const date of Object.keys(doneByDate).sort().reverse().slice(0, 60)) {
+      kept[date] = doneByDate[date];
+    }
+    doneByDate = kept;
+    try {
+      await host.storage.set("done", doneByDate);
+    } catch {
+    }
+  };
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
     if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -2020,6 +2104,24 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         message: error instanceof Error ? error.message : String(error)
       })
     );
+  };
+  var makeDoneCheckbox = (task, row) => {
+    const wrap = el2("span", "cu-check");
+    wrap.addEventListener("click", (event) => event.stopPropagation());
+    wrap.addEventListener("keydown", (event) => event.stopPropagation());
+    row.append(wrap);
+    const handle = mountCheckbox(wrap, {
+      label: "",
+      checked: doneToday.has(task.id),
+      onChange: (checked) => {
+        if (checked) doneToday.add(task.id);
+        else doneToday.delete(task.id);
+        row.classList.toggle("cu-done", checked);
+        handle.update({ checked });
+        void persistDone();
+      }
+    });
+    active2.push(handle);
   };
   var makeRow = (task, frente) => {
     const row = el2("div", "cu-row");
@@ -2055,6 +2157,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       metaEl.textContent = due;
       row.append(metaEl);
     }
+    makeDoneCheckbox(task, row);
     row.addEventListener("click", () => attachTask(task));
     row.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
@@ -2179,6 +2282,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         user = null;
         teamIds = [];
       }
+      await readDone();
       await ensureContext();
       const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user.id), state.filter === "all");
       if (current !== generation) return;

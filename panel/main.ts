@@ -10,12 +10,13 @@ import {
   applyHostReady,
   mountBanner,
   mountButton,
+  mountCheckbox,
   mountEmpty,
   mountSearchField,
   mountSpinner,
   mountTabs,
 } from "@openchamber/sdk/ui";
-import type { ButtonHandle, TabsHandle, Tone } from "@openchamber/sdk/ui";
+import type { ButtonHandle, CheckboxHandle, TabsHandle, Tone } from "@openchamber/sdk/ui";
 import {
   buildGroups,
   buildTree,
@@ -301,6 +302,54 @@ const renderFrenteTabs = (tasks: ClickUpTask[], frente: string): void => {
 
 const collapsed = new Set<string>();
 
+// Local "done today" tracking, stored on the OpenChamber server under one key.
+const localDateKey = (): string => {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+};
+
+const parseDone = (value: unknown): Record<string, string[]> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [date, ids] of Object.entries(value as Record<string, unknown>)) {
+    if (Array.isArray(ids)) out[date] = ids.filter((id): id is string => typeof id === "string");
+  }
+  return out;
+};
+
+let doneByDate: Record<string, string[]> = {};
+let doneToday = new Set<string>();
+let todayKey = localDateKey();
+let doneLoaded = false;
+
+const readDone = async (): Promise<void> => {
+  if (!doneLoaded) {
+    try {
+      doneByDate = parseDone(await host.storage.get("done"));
+    } catch {
+      doneByDate = {};
+    }
+    doneLoaded = true;
+  }
+  todayKey = localDateKey();
+  doneToday = new Set(doneByDate[todayKey] ?? []);
+};
+
+const persistDone = async (): Promise<void> => {
+  doneByDate[todayKey] = [...doneToday];
+  const kept: Record<string, string[]> = {};
+  for (const date of Object.keys(doneByDate).sort().reverse().slice(0, 60)) {
+    kept[date] = doneByDate[date];
+  }
+  doneByDate = kept;
+  try {
+    await host.storage.set("done", doneByDate);
+  } catch {
+    // Local-only tracking; a failed write is not worth interrupting the panel.
+  }
+};
+
 const statusTone = (status: string, type: string | undefined): Tone => {
   const value = status.toLowerCase();
   if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -333,6 +382,25 @@ const attachTask = (task: ClickUpTask): void => {
         message: error instanceof Error ? error.message : String(error),
       }),
     );
+};
+
+const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
+  const wrap = el("span", "cu-check");
+  wrap.addEventListener("click", (event) => event.stopPropagation());
+  wrap.addEventListener("keydown", (event) => event.stopPropagation());
+  row.append(wrap);
+  const handle = mountCheckbox(wrap, {
+    label: "",
+    checked: doneToday.has(task.id),
+    onChange: (checked) => {
+      if (checked) doneToday.add(task.id);
+      else doneToday.delete(task.id);
+      row.classList.toggle("cu-done", checked);
+      handle.update({ checked });
+      void persistDone();
+    },
+  });
+  active.push(handle);
 };
 
 const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
@@ -369,6 +437,7 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
     metaEl.textContent = due;
     row.append(metaEl);
   }
+  makeDoneCheckbox(task, row);
   row.addEventListener("click", () => attachTask(task));
   row.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -504,6 +573,7 @@ const load = async (force: boolean): Promise<void> => {
       user = null;
       teamIds = [];
     }
+    await readDone();
     await ensureContext();
     const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user!.id), state.filter === "all");
     if (current !== generation) return;
