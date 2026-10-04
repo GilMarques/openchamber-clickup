@@ -92,7 +92,6 @@ bar.append(spacer);
 const refreshHost = el("div");
 bar.append(refreshHost);
 
-const sub = el("div", "sub");
 const tools = el("div", "tools");
 const searchHost = el("div");
 const tabsHost = el("div");
@@ -104,7 +103,7 @@ frenteRow.append(frenteLabel, frenteTabsHost);
 frenteRow.hidden = true;
 tools.append(searchHost, tabsHost, frenteRow);
 const content = el("div", "content");
-root.append(bar, sub, tools, content);
+root.append(bar, tools, content);
 
 let refreshButton: ButtonHandle | null = null;
 let frenteTabs: TabsHandle | null = null;
@@ -416,13 +415,6 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
 
 // --- Rendering --------------------------------------------------------------
 
-const renderHeader = () => {
-  const open = state.tasks.filter((task) => !isClosed(task)).length;
-  const shown = visibleTasks().length;
-  const who = user?.username ? `${user.username} · ` : "";
-  sub.textContent = state.connected ? `${who}${shown} shown · ${open} open` : "Not connected";
-};
-
 const renderContent = () => {
   clearContent();
   frenteRow.hidden = true;
@@ -497,14 +489,12 @@ const renderContent = () => {
 
 const load = async (force: boolean): Promise<void> => {
   if (!state.connected) {
-    renderHeader();
     renderContent();
     return;
   }
   const current = ++generation;
   state.status = { kind: "loading" };
   refreshButton?.update({ loading: true, disabled: true });
-  renderHeader();
   renderContent();
   try {
     if (force) {
@@ -531,7 +521,6 @@ const load = async (force: boolean): Promise<void> => {
   } finally {
     if (current === generation) {
       refreshButton?.update({ loading: false, disabled: false });
-      renderHeader();
       renderContent();
     }
   }
@@ -558,7 +547,6 @@ const applyConnection = (connection: GuestConnection | undefined): void => {
   } else if (!connected) {
     state.tasks = [];
     state.status = { kind: "idle" };
-    renderHeader();
     renderContent();
   }
 };
@@ -577,5 +565,4 @@ host.onSettings((settings) => {
   if (changed && state.connected) void load(true);
 });
 
-renderHeader();
 renderContent();

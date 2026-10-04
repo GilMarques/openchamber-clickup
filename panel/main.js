@@ -1817,7 +1817,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   bar.append(spacer);
   var refreshHost = el2("div");
   bar.append(refreshHost);
-  var sub = el2("div", "sub");
   var tools = el2("div", "tools");
   var searchHost = el2("div");
   var tabsHost = el2("div");
@@ -1829,7 +1828,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   frenteRow.hidden = true;
   tools.append(searchHost, tabsHost, frenteRow);
   var content = el2("div", "content");
-  root.append(bar, sub, tools, content);
+  root.append(bar, tools, content);
   var refreshButton = null;
   var frenteTabs = null;
   var active2 = [];
@@ -2096,12 +2095,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       }
     }
   };
-  var renderHeader = () => {
-    const open = state.tasks.filter((task) => !isClosed(task)).length;
-    const shown = visibleTasks().length;
-    const who = user?.username ? `${user.username} \xB7 ` : "";
-    sub.textContent = state.connected ? `${who}${shown} shown \xB7 ${open} open` : "Not connected";
-  };
   var renderContent = () => {
     clearContent();
     frenteRow.hidden = true;
@@ -2169,14 +2162,12 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   };
   var load = async (force) => {
     if (!state.connected) {
-      renderHeader();
       renderContent();
       return;
     }
     const current = ++generation;
     state.status = { kind: "loading" };
     refreshButton?.update({ loading: true, disabled: true });
-    renderHeader();
     renderContent();
     try {
       if (force) {
@@ -2203,7 +2194,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     } finally {
       if (current === generation) {
         refreshButton?.update({ loading: false, disabled: false });
-        renderHeader();
         renderContent();
       }
     }
@@ -2224,7 +2214,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     } else if (!connected) {
       state.tasks = [];
       state.status = { kind: "idle" };
-      renderHeader();
       renderContent();
     }
   };
@@ -2239,6 +2228,5 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     state.settings = settings ?? {};
     if (changed && state.connected) void load(true);
   });
-  renderHeader();
   renderContent();
 })();
