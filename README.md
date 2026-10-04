@@ -201,30 +201,28 @@ without re-pasting. Prefer local notes/ticks so AI text never lands in ClickUp.
 `skills/clickup-tasks/SKILL.md` documents this contract for agent sessions; it is
 symlinked into `~/.config/opencode/skills/clickup-tasks`.
 
-### Notes are markdown
+### Notes are markdown, and editable in the notes tab
 
-Notes are plain text — write markdown in the note editor and the **ClickUp
-Notes** page (Extension pages menu) renders it: headings, lists, code, quotes,
-links, tables. It needs no extra permission.
+Notes are plain-text markdown. The **ClickUp Notes** page (Extension pages menu)
+renders them — headings, lists, code, quotes, links, tables — and edits them in
+place with CodeMirror: markdown highlighting, line numbers, undo/redo, and
+`Ctrl/Cmd+S` to save. Saving writes back to extension storage and appends a
+`note-set` event. No extra permission is needed.
 
-### The Files panel, and the `files-nav` companion
+The editor bundles CodeMirror (`@codemirror/state|view|commands|language` plus
+`@lezer/markdown`; minified ~400 KB, loaded only on this page). It uses the bare
+markdown parser rather than `@codemirror/lang-markdown`, which would also pull in
+the HTML/CSS/JS grammars for embedded code blocks (~1 MB).
+
+### Why not the Files panel
 
 There is no API for an extension to make OpenChamber open a file, and
-`contributes.fileEditors` only exists from OpenChamber 2.0.4. The working
-composition is:
-
-1. Click **Export** on the ClickUp Notes page. It writes every note to
-   `~/clickup-notes.md` — the extension's only grant outside the project
-   (`filesystem: ["~/clickup-notes.md"]`), approved on first use.
-2. Install the MIT-licensed companion
-   [openchamber-files-ext](https://github.com/PylotLight/openchamber-files-ext)
-   (`files-nav`). Its Files panel can browse `~` (Home toggle) and opens the
-   export in a CodeMirror markdown editor with highlighting, tabs, and Save.
-
-The export is one-way; edits made in that file are not read back into notes. We
-deliberately do **not** submodule `files-nav`: it is a standalone extension
-(CodeMirror plus its own tree/tab shell, ~950 KB bundle and ~2 MB of data), not a
-reusable viewer component.
+`contributes.fileEditors` only exists from OpenChamber 2.0.4 (this app is 2.0.2).
+So the markdown tab is ours. It needs no files, no companion extension, and no
+grant outside the project. (The MIT companion
+[openchamber-files-ext](https://github.com/PylotLight/openchamber-files-ext)
+could still be installed for general file browsing; it is a standalone extension,
+not a viewer library, so it is not submoduled here.)
 
 ## Develop
 

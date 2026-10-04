@@ -1875,6 +1875,18 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     return byDueDate(a, b);
   };
 
+  // panel/local.ts
+  var EVENTS_MAX = 500;
+  var pushEvent = (events2, type, taskId, date) => {
+    events2.push({ at: (/* @__PURE__ */ new Date()).toISOString(), type, taskId, ...date ? { date } : {} });
+    if (events2.length > EVENTS_MAX) events2.splice(0, events2.length - EVENTS_MAX);
+  };
+  var localDateKey = () => {
+    const now = /* @__PURE__ */ new Date();
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  };
+
   // panel/main.ts
   var host = connectHost();
   var PROVIDER = "clickup-tasks";
@@ -2092,11 +2104,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     frenteTabs?.update({ items, activeId: state.frenteFilter ? `f:${state.frenteFilter}` : "all" });
   };
   var collapsed = /* @__PURE__ */ new Set();
-  var localDateKey = () => {
-    const now = /* @__PURE__ */ new Date();
-    const pad = (value) => String(value).padStart(2, "0");
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  };
   var parseDone = (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     const out = {};
@@ -2149,7 +2156,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       await host.storage.set("done", doneByDate);
     } catch {
     }
-    await pushEvent(action, taskId);
+    await recordEvent(action, taskId);
   };
   var notes = {};
   var editingNote = /* @__PURE__ */ new Set();
@@ -2176,9 +2183,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       else await host.storage.delete(`note:${taskId}`);
     } catch {
     }
-    await pushEvent(action, taskId);
+    await recordEvent(action, taskId);
   };
-  var EVENTS_MAX = 500;
   var events = [];
   var eventsLoaded = false;
   var readEvents = async () => {
@@ -2203,9 +2209,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     }
     if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
   };
-  var pushEvent = async (type, taskId, date) => {
-    events.push({ at: (/* @__PURE__ */ new Date()).toISOString(), type, taskId, ...date ? { date } : {} });
-    if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
+  var recordEvent = async (type, taskId, date) => {
+    pushEvent(events, type, taskId, date);
     try {
       await host.storage.set("events", events);
     } catch {

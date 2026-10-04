@@ -35,6 +35,13 @@ import {
   type TreeNode,
 } from "./clickup.ts";
 
+import {
+  EVENTS_MAX,
+  localDateKey,
+  pushEvent,
+  type LocalEvent,
+} from "./local.ts";
+
 // --- ClickUp API glue -------------------------------------------------------
 
 type ClickUpUser = { id: number; username?: string };
@@ -317,12 +324,6 @@ const renderFrenteTabs = (tasks: ClickUpTask[], frente: string): void => {
 const collapsed = new Set<string>();
 
 // Local "done today" tracking, stored on the OpenChamber server under one key.
-const localDateKey = (): string => {
-  const now = new Date();
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-};
-
 const parseDone = (value: unknown): Record<string, string[]> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, string[]> = {};
@@ -386,7 +387,7 @@ const persistDone = async (
   } catch {
     // Local-only tracking; a failed write is not worth interrupting the panel.
   }
-  await pushEvent(action, taskId);
+  await recordEvent(action, taskId);
 };
 
 // Local notes, one storage key per task (`note:<id>`), never sent to ClickUp.
@@ -419,12 +420,10 @@ const persistNote = async (taskId: string, action: "note-set" | "note-delete"): 
   } catch {
     // Ignore; the note stays in memory for this session.
   }
-  await pushEvent(action, taskId);
+  await recordEvent(action, taskId);
 };
 
 // Append-only history with timestamps. Stored only; nothing shows it in the UI.
-const EVENTS_MAX = 500;
-type LocalEvent = { at: string; type: string; taskId: string; date?: string };
 const events: LocalEvent[] = [];
 let eventsLoaded = false;
 
@@ -457,9 +456,8 @@ const readEvents = async (): Promise<void> => {
   if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
 };
 
-const pushEvent = async (type: string, taskId: string, date?: string): Promise<void> => {
-  events.push({ at: new Date().toISOString(), type, taskId, ...(date ? { date } : {}) });
-  if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
+const recordEvent = async (type: string, taskId: string, date?: string): Promise<void> => {
+  pushEvent(events, type, taskId, date);
   try {
     await host.storage.set("events", events);
   } catch {

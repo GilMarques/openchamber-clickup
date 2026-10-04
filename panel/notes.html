@@ -49,6 +49,16 @@
         padding: 14px;
         margin: 0 0 12px;
       }
+      .card-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 2px;
+      }
+      .card-actions {
+        display: inline-flex;
+        gap: 6px;
+      }
       .card-title {
         font-weight: 600;
         font-size: 14px;
@@ -143,6 +153,17 @@
       }
       .md img {
         max-width: 100%;
+      }
+      .editor {
+        border: 1px solid var(--oc-border, transparent);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .editor .cm-editor {
+        max-height: 340px;
+      }
+      .editor .cm-scroller {
+        overflow: auto;
       }
     </style>
   </head>

@@ -20,7 +20,6 @@
         "title": "ClickUp Notes"
       },
       "attach": "panel",
-      "filesystem": ["~/clickup-notes.md"],
       "commands": [
         {
           "name": "clickup",
@@ -75,7 +74,7 @@
   "scripts": {
     "build": "npm run build:panel && npm run build:notes",
     "build:panel": "esbuild panel/main.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/main.js",
-    "build:notes": "esbuild panel/notes.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/notes.js",
+    "build:notes": "esbuild panel/notes.ts --bundle --minify --format=iife --platform=browser --target=es2020 --outfile=panel/notes.js",
     "typecheck": "tsc --noEmit",
     "check": "node scripts/check-manifest.mjs",
     "live-check": "bun scripts/live-check.ts"
@@ -86,6 +85,11 @@
     "typescript": "^5.6.0"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@lezer/markdown": "^1.7.2",
     "marked": "^18.0.14"
   }
 }

@@ -1,47 +1,68 @@
 // Full-screen "ClickUp Notes" page (contributes.page).
 //
-// Opened from the Extension pages menu in the main area. Renders every local
-// note as markdown, newest note first. Notes stay local to OpenChamber.
+// Opened from the Extension pages menu in the main area. Every local note is
+// rendered as markdown and can be edited in place with CodeMirror (markdown
+// highlighting, Cmd/Ctrl+S to save). Notes stay local to OpenChamber.
 import { connectHost } from "@openchamber/sdk";
 import { applyHostReady, mountButton, mountEmpty, mountSpinner } from "@openchamber/sdk/ui";
 import { marked } from "marked";
+import { EditorState } from "@codemirror/state";
+import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import {
+  defaultHighlightStyle,
+  defineLanguageFacet,
+  Language,
+  LanguageSupport,
+  syntaxHighlighting,
+} from "@codemirror/language";
+import { GFM, parser as markdownParser } from "@lezer/markdown";
 import {
   fetchAssignedTasks,
   sprintLabel,
   type ClickUpRequest,
   type ClickUpTask,
 } from "./clickup.ts";
+import { noteKey, pushEvent, type LocalEvent } from "./local.ts";
 
 const host = connectHost();
 const root = document.querySelector("#root");
 if (!(root instanceof HTMLElement)) throw new Error("Missing #root");
 
-const bar = document.createElement("div");
-bar.className = "bar";
-const title = document.createElement("div");
-title.className = "title";
+const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] => {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  return node;
+};
+
+const bar = el("div", "bar");
+const title = el("div", "title");
 title.textContent = "ClickUp Notes";
-const count = document.createElement("div");
-count.className = "count";
-const spacer = document.createElement("div");
-spacer.className = "spacer";
-const exportHost = document.createElement("div");
-const refreshHost = document.createElement("div");
-bar.append(title, count, spacer, exportHost, refreshHost);
-const content = document.createElement("div");
-content.className = "content";
+const count = el("div", "count");
+const spacer = el("div", "spacer");
+const refreshHost = el("div");
+bar.append(title, count, spacer, refreshHost);
+const content = el("div", "content");
 root.append(bar, content);
 
 let active: Array<{ dispose: () => void }> = [];
 let settings: Record<string, string> = {};
 const frenteFolder = (): string => settings["frente-folder"]?.trim() || "Frentes";
 const sprintField = (): string => settings["sprint-field"]?.trim() || "Sprints";
+
 const clear = () => {
   for (const handle of active) handle.dispose();
   active = [];
   content.replaceChildren();
   content.classList.remove("cu-center");
 };
+
+const updateCount = () => {
+  const total = content.querySelectorAll(".card").length;
+  count.textContent = total === 1 ? "1 note" : `${total} notes`;
+};
+
+// --- Data -------------------------------------------------------------------
 
 const requestJson = async <T,>(path: string, query?: Record<string, string>): Promise<T> => {
   const result = await host.request({ method: "GET", path, query });
@@ -96,6 +117,33 @@ const loadTasks = async (): Promise<Map<string, ClickUpTask>> => {
   return new Map(tasks.map((task) => [task.id, task]));
 };
 
+/** Write a note (or delete it when empty), append the event, and bump the poll marker. */
+const persistNote = async (taskId: string, text: string): Promise<void> => {
+  const trimmed = text.trim();
+  try {
+    if (trimmed) await host.storage.set(noteKey(taskId), trimmed);
+    else await host.storage.delete(noteKey(taskId));
+  } catch {
+    // Fall through to the event write; the caller shows errors.
+  }
+  let events: LocalEvent[] = [];
+  try {
+    const stored = await host.storage.get("events");
+    if (Array.isArray(stored)) events = stored as LocalEvent[];
+  } catch {
+    events = [];
+  }
+  pushEvent(events, trimmed ? "note-set" : "note-delete", taskId);
+  try {
+    await host.storage.set("events", events);
+    await host.storage.set("updated", String(Date.now()));
+  } catch {
+    // Best-effort history.
+  }
+};
+
+// --- Markdown rendering -----------------------------------------------------
+
 /** Markdown to HTML, with scripts/event handlers stripped before it lands in the DOM. */
 const renderMarkdown = (container: HTMLElement, text: string): void => {
   const html = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
@@ -121,6 +169,176 @@ content.addEventListener("click", (event) => {
   }
 });
 
+// --- Editor -----------------------------------------------------------------
+
+const editorTheme = () =>
+  EditorView.theme(
+    {
+      "&": { color: "var(--oc-fg, inherit)", backgroundColor: "transparent", fontSize: "13px" },
+      ".cm-content": { fontFamily: "var(--oc-mono, monospace)", padding: "8px 0" },
+      ".cm-line": { padding: "0 10px" },
+      "&.cm-focused": { outline: "none" },
+      ".cm-gutters": {
+        backgroundColor: "transparent",
+        color: "var(--oc-muted, inherit)",
+        border: "none",
+      },
+      ".cm-activeLine": { backgroundColor: "var(--oc-hover, transparent)" },
+      ".cm-activeLineGutter": { backgroundColor: "var(--oc-hover, transparent)" },
+      ".cm-cursor": { borderLeftColor: "var(--oc-fg, inherit)" },
+      ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": {
+        backgroundColor: "var(--oc-selection, rgba(127,127,127,0.3))",
+      },
+    },
+    { dark: document.documentElement.dataset.ocTheme === "dark" },
+  );
+
+// Bare markdown parser: @codemirror/lang-markdown would also bundle the HTML,
+// CSS and JS grammars for embedded blocks (~1 MB); notes do not need them.
+// `Language` (not `LRLanguage`) is the wrapper for non-LR parsers.
+const markdownLanguage = new LanguageSupport(
+  new Language(defineLanguageFacet(), markdownParser.configure([GFM]), [], "markdown"),
+);
+
+const makeEditor = (parent: HTMLElement, text: string, save: () => void): EditorView => {
+  const state = EditorState.create({
+    doc: text,
+    extensions: [
+      lineNumbers(),
+      history(),
+      drawSelection(),
+      highlightActiveLine(),
+      EditorView.lineWrapping,
+      markdownLanguage,
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      keymap.of([
+        { key: "Mod-s", preventDefault: true, run: () => (save(), true) },
+        ...defaultKeymap,
+        ...historyKeymap,
+      ]),
+      editorTheme(),
+    ],
+  });
+  return new EditorView({ state, parent });
+};
+
+// --- Cards ------------------------------------------------------------------
+
+const metaFor = (task: ClickUpTask | undefined, taskId: string, savedAt?: string): string => {
+  const parts = task
+    ? [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
+    : [];
+  if (savedAt) parts.push(`saved ${new Date(savedAt).toLocaleString()}`);
+  return parts.filter(Boolean).join(" · ") || taskId;
+};
+
+const renderCard = (
+  taskId: string,
+  task: ClickUpTask | undefined,
+  initialText: string,
+  initialSavedAt: string | undefined,
+): HTMLElement => {
+  let text = initialText;
+  let savedAt = initialSavedAt;
+
+  const card = el("div", "card");
+  const head = el("div", "card-head");
+  const heading = el("div", "card-title");
+  const link = el("a");
+  link.href = task?.url ?? `https://app.clickup.com/t/${taskId}`;
+  link.textContent = task?.name ?? taskId;
+  heading.append(link);
+  const actions = el("div", "card-actions");
+  head.append(heading, el("div", "spacer"), actions);
+  const meta = el("div", "card-meta");
+  const body = el("div", "card-body");
+  card.append(head, meta, body);
+
+  const paintMeta = () => {
+    meta.textContent = metaFor(task, taskId, savedAt);
+  };
+
+  const showView = () => {
+    actions.replaceChildren();
+    active.push(
+      mountButton(actions, {
+        label: "Edit",
+        variant: "ghost",
+        size: "xs",
+        onClick: () => showEdit(),
+      }),
+    );
+    body.replaceChildren();
+    const rendered = el("div", "md");
+    renderMarkdown(rendered, text);
+    body.append(rendered);
+  };
+
+  const showEdit = () => {
+    actions.replaceChildren();
+    body.replaceChildren();
+    const editorHost = el("div", "editor");
+    body.append(editorHost);
+    let view: EditorView | null = null;
+
+    const save = async () => {
+      const value = (view?.state.doc.toString() ?? text).trim();
+      try {
+        await persistNote(taskId, value);
+      } catch (error) {
+        await host.toast({
+          kind: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      text = value;
+      savedAt = new Date().toISOString();
+      view?.destroy();
+      paintMeta();
+      if (!text) {
+        card.remove();
+        updateCount();
+        return;
+      }
+      showView();
+    };
+
+    const cancel = () => {
+      view?.destroy();
+      showView();
+    };
+
+    view = makeEditor(editorHost, text, () => void save());
+    active.push(
+      mountButton(actions, { label: "Save", size: "xs", onClick: () => void save() }),
+      mountButton(actions, { label: "Cancel", variant: "ghost", size: "xs", onClick: cancel }),
+    );
+    if (text) {
+      active.push(
+        mountButton(actions, {
+          label: "Delete",
+          variant: "destructive",
+          size: "xs",
+          onClick: async () => {
+            await persistNote(taskId, "");
+            view?.destroy();
+            card.remove();
+            updateCount();
+          },
+        }),
+      );
+    }
+    view.focus();
+  };
+
+  paintMeta();
+  showView();
+  return card;
+};
+
+// --- Page -------------------------------------------------------------------
+
 const render = async (): Promise<void> => {
   clear();
   refreshButton?.update({ loading: true, disabled: true });
@@ -138,8 +356,8 @@ const render = async (): Promise<void> => {
     const ids = Object.keys(notes).sort(
       (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
     );
-    count.textContent = ids.length === 1 ? "1 note" : `${ids.length} notes`;
     if (ids.length === 0) {
+      count.textContent = "0 notes";
       active.push(
         mountEmpty(content, {
           title: "No local notes yet",
@@ -149,33 +367,9 @@ const render = async (): Promise<void> => {
       return;
     }
     for (const taskId of ids) {
-      const task = tasks.get(taskId);
-      const card = document.createElement("div");
-      card.className = "card";
-      const heading = document.createElement("div");
-      heading.className = "card-title";
-      const link = document.createElement("a");
-      link.href = task?.url ?? `https://app.clickup.com/t/${taskId}`;
-      link.textContent = task?.name ?? taskId;
-      heading.append(link);
-      const meta = document.createElement("div");
-      meta.className = "card-meta";
-      meta.textContent = task
-        ? [
-            sprintLabel(task, frenteFolder(), sprintField()),
-            task.status?.status,
-            task.list?.name,
-            lastNoteAt[taskId] ? new Date(lastNoteAt[taskId]).toLocaleString() : "",
-          ]
-            .filter(Boolean)
-            .join(" · ")
-        : taskId;
-      const body = document.createElement("div");
-      body.className = "md";
-      renderMarkdown(body, notes[taskId]);
-      card.append(heading, meta, body);
-      content.append(card);
+      content.append(renderCard(taskId, tasks.get(taskId), notes[taskId], lastNoteAt[taskId]));
     }
+    updateCount();
   } catch (error) {
     clear();
     active.push(
@@ -195,74 +389,6 @@ refreshButton = mountButton(refreshHost, {
   variant: "secondary",
   size: "sm",
   onClick: () => void render(),
-});
-
-/** Export every note to a markdown file the Files panel (or files-nav) can open. */
-const EXPORT_PATH = "~/clickup-notes.md";
-let exportButton: ReturnType<typeof mountButton> | null = null;
-
-const exportNotes = async (): Promise<void> => {
-  exportButton?.update({ loading: true, disabled: true });
-  try {
-    const [notes, lastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
-    let tasks = new Map<string, ClickUpTask>();
-    try {
-      tasks = await loadTasks();
-    } catch {
-      // Export without titles if the API is unavailable.
-    }
-    const ids = Object.keys(notes).sort(
-      (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
-    );
-    const lines: string[] = [
-      "# ClickUp Notes",
-      "",
-      `_${ids.length} note${ids.length === 1 ? "" : "s"} · exported ${new Date().toLocaleString()} · local to OpenChamber, never sent to ClickUp_`,
-      "",
-    ];
-    for (const taskId of ids) {
-      const task = tasks.get(taskId);
-      const url = task?.url ?? `https://app.clickup.com/t/${taskId}`;
-      const title = task?.name ?? taskId;
-      const meta = task
-        ? [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
-            .filter(Boolean)
-            .join(" · ")
-        : "";
-      lines.push(
-        `## ${title}`,
-        "",
-        `[${taskId}](${url})${meta ? ` · ${meta}` : ""}${
-          lastNoteAt[taskId] ? ` · saved ${new Date(lastNoteAt[taskId]).toLocaleString()}` : ""
-        }`,
-        "",
-        notes[taskId],
-        "",
-        "---",
-        "",
-      );
-    }
-    await host.writeFile(EXPORT_PATH, lines.join("\n"));
-    await host.toast({
-      kind: "success",
-      message: `Notes exported to ${EXPORT_PATH}`,
-      copy: { text: EXPORT_PATH },
-    });
-  } catch (error) {
-    await host.toast({
-      kind: "error",
-      message: error instanceof Error ? error.message : String(error),
-    });
-  } finally {
-    exportButton?.update({ loading: false, disabled: false });
-  }
-};
-
-exportButton = mountButton(exportHost, {
-  label: "Export",
-  variant: "secondary",
-  size: "sm",
-  onClick: () => void exportNotes(),
 });
 
 host.onReady((ctx) => {
