@@ -452,6 +452,7 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
             if (trimmed) notes[task.id] = trimmed;
             else delete notes[task.id];
             editingNote.delete(task.id);
+            syncNoteButton(task.id);
             void persistNote(task.id);
             paint();
           },
@@ -475,6 +476,7 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
             onClick: () => {
               delete notes[task.id];
               editingNote.delete(task.id);
+              syncNoteButton(task.id);
               void persistNote(task.id);
               paint();
             },
@@ -483,14 +485,6 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
       }
       editor.append(actions);
       element.append(editor);
-      element.hidden = false;
-      return;
-    }
-    if (value) {
-      const display = el("div", "cu-note");
-      display.textContent = value;
-      display.addEventListener("click", () => open());
-      element.append(display);
       element.hidden = false;
       return;
     }
@@ -507,15 +501,24 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
 const NOTE_ICON =
   '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
 
-const makeNoteButton = (onNote: () => void): HTMLButtonElement => {
+const noteButtonByTask = new Map<string, HTMLButtonElement>();
+
+const syncNoteButton = (taskId: string): void => {
+  const button = noteButtonByTask.get(taskId);
+  if (button) button.dataset.has = notes[taskId] ? "true" : "false";
+};
+
+const makeNoteButton = (task: ClickUpTask, onNote: () => void): HTMLButtonElement => {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "cu-icon-btn";
   button.setAttribute("aria-label", "Add or edit note");
+  button.dataset.has = notes[task.id] ? "true" : "false";
   button.innerHTML =
     `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
     `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICON}</svg>`;
   button.addEventListener("click", onNote);
+  noteButtonByTask.set(task.id, button);
   return button;
 };
 
@@ -577,7 +580,7 @@ const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLEle
   const noteHost = el("span", "cu-note-btn");
   noteHost.addEventListener("click", (event) => event.stopPropagation());
   noteHost.addEventListener("keydown", (event) => event.stopPropagation());
-  noteHost.append(makeNoteButton(onNote));
+  noteHost.append(makeNoteButton(task, onNote));
   row.append(noteHost);
   row.addEventListener("click", () => attachTask(task));
   row.addEventListener("keydown", (event) => {

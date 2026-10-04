@@ -251,21 +251,17 @@
         outline: none;
         box-shadow: 0 0 0 2px var(--oc-focus, currentColor);
       }
+      .cu-icon-btn[data-has="true"] {
+        color: var(--oc-fg, inherit);
+      }
+      .cu-icon-btn[data-has="true"] svg {
+        fill: currentColor;
+      }
       .cu-note-wrap {
         padding: 0 8px 6px calc(32px + var(--cu-indent, 0px));
       }
       .cu-note-wrap[hidden] {
         display: none;
-      }
-      .cu-note {
-        font-size: 0.75rem;
-        line-height: 1.4;
-        color: var(--oc-muted, inherit);
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        border-left: 2px solid var(--oc-border, transparent);
-        padding-left: 8px;
-        cursor: text;
       }
       .cu-note-editor {
         display: flex;
