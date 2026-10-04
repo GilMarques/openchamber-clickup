@@ -81,7 +81,10 @@ The panel also re-reads on a forced refresh (the refresh icon).
   saves. Keep agent-written notes markdown so they render.
 - The panel groups by frente, orders by sprint, shows a workflow-status dot, a
   priority badge, expandable subtasks, a done checkbox, and a note icon that
-  turns solid when a note exists.
+  turns solid when a note exists. Clicking the note icon hands the note to the
+  **ClickUp Notes** page (the panel has no API to open that page itself, so it
+  leaves an `open-note` handoff in storage and the page picks it up); there is
+  no inline editor in the rail anymore.
 - The Files panel cannot be driven: the guest API has no "open file" call in
   OpenChamber 2.0.2, and `contributes.fileEditors` only exists from 2.0.4. Use
   the ClickUp Notes page.

@@ -31,11 +31,13 @@ install prompt has nothing to approve.
   and **does not change anything in ClickUp**. Checked rows get a struck-through
   title. Ticks are per calendar day in your local time; the last 60 days are
   kept, so a new day starts unticked.
-- A **local note** on each task: click the note icon on a row to write one. Notes
+- A **local note** on each task: click the note icon on a row and the note opens
+  as a tab in the **ClickUp Notes** page (main area → Extension pages). Notes
   live in the extension's own storage (key `note:<taskId>`) and are **never sent
   to ClickUp**, so pasted AI text stays out of your workspace. A saved note is
   not shown in the list — the row's note icon turns **solid** so you can tell one
-  exists; click it to open, edit, or Delete.
+  exists. (The rail panel cannot open the Notes page itself — no guest API for
+  it — so the icon leaves the note ready in that tab and points you there.)
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible

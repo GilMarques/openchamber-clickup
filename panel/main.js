@@ -1325,54 +1325,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     };
   };
 
-  // node_modules/@openchamber/sdk/dist/ui/field.js
-  var mountTextField = (root2, initial) => {
-    ensureStyle(UI_CSS);
-    let props = initial;
-    const field = el("label", "oc-sdk oc-sdk-field");
-    const caption = el("span", "oc-sdk-field-label");
-    const input = props.multiline ? el("textarea", "oc-sdk-input") : el("input", "oc-sdk-input");
-    const note = el("span", "oc-sdk-field-note");
-    field.append(caption, input, note);
-    root2.append(field);
-    const paint = () => {
-      setText(caption, props.label);
-      caption.hidden = !props.label;
-      if (input instanceof HTMLInputElement) {
-        input.type = props.password ? "password" : "text";
-      } else {
-        input.rows = props.rows ?? 3;
-      }
-      if (input.value !== props.value) {
-        input.value = props.value;
-      }
-      input.disabled = Boolean(props.disabled);
-      setAttr(input, "placeholder", props.placeholder);
-      input.dataset.mono = props.mono ? "true" : "false";
-      const invalid = Boolean(props.error);
-      field.dataset.invalid = invalid ? "true" : "false";
-      input.setAttribute("aria-invalid", invalid ? "true" : "false");
-      const text = props.error ?? props.helper ?? "";
-      setText(note, text);
-      note.hidden = text === "";
-    };
-    const onInput = () => {
-      props.onChange(input.value);
-    };
-    input.addEventListener("input", onInput);
-    paint();
-    return {
-      update: (next) => {
-        props = { ...props, ...next };
-        paint();
-      },
-      dispose: () => {
-        input.removeEventListener("input", onInput);
-        field.remove();
-      }
-    };
-  };
-
   // node_modules/@openchamber/sdk/dist/ui/icons.js
   var SVG_NS = "http://www.w3.org/2000/svg";
   var ICON_PATH = {
@@ -2159,7 +2111,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     await recordEvent(action, taskId);
   };
   var notes = {};
-  var editingNote = /* @__PURE__ */ new Set();
   var notesLoaded = false;
   var readNotes = async () => {
     if (notesLoaded) return;
@@ -2175,15 +2126,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       }
     } catch {
     }
-  };
-  var persistNote = async (taskId, action) => {
-    try {
-      const value = notes[taskId];
-      if (value) await host.storage.set(`note:${taskId}`, value);
-      else await host.storage.delete(`note:${taskId}`);
-    } catch {
-    }
-    await recordEvent(action, taskId);
   };
   var events = [];
   var eventsLoaded = false;
@@ -2269,91 +2211,23 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       })
     );
   };
-  var createNote = (task, depth) => {
-    const element = el2("div", "cu-note-wrap");
-    element.style.setProperty("--cu-indent", `${depth * 14}px`);
-    const paint = () => {
-      element.replaceChildren();
-      const value = notes[task.id] ?? "";
-      if (editingNote.has(task.id)) {
-        let draft = value;
-        const editor = el2("div", "cu-note-editor");
-        const fieldHost = el2("div");
-        editor.append(fieldHost);
-        active2.push(
-          mountTextField(fieldHost, {
-            value,
-            multiline: true,
-            rows: 3,
-            placeholder: "Local markdown note (kept in OpenChamber, not in ClickUp)",
-            onChange: (next) => {
-              draft = next;
-            }
-          })
-        );
-        const actions = el2("div", "cu-note-actions");
-        active2.push(
-          mountButton(actions, {
-            label: "Save",
-            size: "xs",
-            onClick: () => {
-              const trimmed = draft.trim();
-              if (trimmed) notes[task.id] = trimmed;
-              else delete notes[task.id];
-              editingNote.delete(task.id);
-              syncNoteButton(task.id);
-              void persistNote(task.id, "note-set");
-              paint();
-            }
-          }),
-          mountButton(actions, {
-            label: "Cancel",
-            variant: "ghost",
-            size: "xs",
-            onClick: () => {
-              editingNote.delete(task.id);
-              paint();
-            }
-          })
-        );
-        if (value) {
-          active2.push(
-            mountButton(actions, {
-              label: "Delete",
-              variant: "destructive",
-              size: "xs",
-              onClick: () => {
-                delete notes[task.id];
-                editingNote.delete(task.id);
-                syncNoteButton(task.id);
-                void persistNote(task.id, "note-delete");
-                paint();
-              }
-            })
-          );
-        }
-        editor.append(actions);
-        element.append(editor);
-        element.hidden = false;
-        return;
-      }
-      element.hidden = true;
-    };
-    const open = () => {
-      editingNote.add(task.id);
-      paint();
-    };
-    paint();
-    return { element, open };
-  };
   var NOTE_ICON = '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
   var noteButtonByTask = /* @__PURE__ */ new Map();
-  var syncNoteButton = (taskId) => {
-    const button2 = noteButtonByTask.get(taskId);
-    if (button2) button2.dataset.has = notes[taskId] ? "true" : "false";
+  var openInNotesPage = (task) => {
+    void (async () => {
+      try {
+        await host.storage.set("open-note", task.id);
+        await touchUpdated();
+      } catch {
+      }
+      await host.toast({
+        kind: "info",
+        message: `Note for ${shortId(task)} lives in ClickUp Notes \u2014 open it from Extension pages.`
+      });
+    })();
   };
-  var makeNoteButton = (task, onNote) => {
-    const button2 = createIconButton("Add or edit note", NOTE_ICON, onNote);
+  var makeNoteButton = (task) => {
+    const button2 = createIconButton("Open note in ClickUp Notes", NOTE_ICON, () => openInNotesPage(task));
     button2.dataset.has = notes[task.id] ? "true" : "false";
     noteButtonByTask.set(task.id, button2);
     return button2;
@@ -2377,7 +2251,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     });
     active2.push(handle);
   };
-  var makeRow = (task, frente, onNote) => {
+  var makeRow = (task, frente) => {
     const row = el2("div", "cu-row");
     row.tabIndex = 0;
     row.setAttribute("role", "button");
@@ -2415,7 +2289,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     const noteHost = el2("span", "cu-note-btn");
     noteHost.addEventListener("click", (event) => event.stopPropagation());
     noteHost.addEventListener("keydown", (event) => event.stopPropagation());
-    noteHost.append(makeNoteButton(task, onNote));
+    noteHost.append(makeNoteButton(task));
     row.append(noteHost);
     row.addEventListener("click", () => attachTask(task));
     row.addEventListener("keydown", (event) => {
@@ -2428,8 +2302,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   };
   var renderTree = (container, nodes, depth, frente) => {
     for (const node of nodes) {
-      const note = createNote(node.task, depth);
-      const row = makeRow(node.task, frente, note.open);
+      const row = makeRow(node.task, frente);
       row.style.setProperty("--cu-indent", `${depth * 14}px`);
       let childrenBox = null;
       if (node.children.length > 0) {
@@ -2456,7 +2329,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         row.prepend(el2("span", "cu-caret-spacer"));
       }
       container.append(row);
-      container.append(note.element);
       if (childrenBox) {
         renderTree(childrenBox, node.children, depth + 1, frente);
         container.append(childrenBox);

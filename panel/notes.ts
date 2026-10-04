@@ -335,9 +335,9 @@ const matchesQuery = (taskId: string): boolean => {
 // --- Tabs -------------------------------------------------------------------
 
 const openNote = (taskId: string): void => {
-  if (!notes[taskId]) return;
   if (!openIds.includes(taskId)) openIds.push(taskId);
   activeId = taskId;
+  if (!notes[taskId] && modes[taskId] === undefined) modes[taskId] = "edit";
   void saveUI();
   renderTabs();
   renderList();
@@ -548,7 +548,7 @@ const renderViewer = (): void => {
   right.hidden = false;
   paintToggles();
 
-  if (!activeId || !notes[activeId]) {
+  if (!activeId) {
     const empty = el("div", "viewer-empty");
     empty.textContent = openIds.length > 0 ? "Select a note" : "No notes open";
     viewerBody.append(empty);
@@ -563,9 +563,9 @@ const renderViewer = (): void => {
   viewerTitle.append(link);
   viewerMeta.textContent = metaFor(taskId);
 
-  const mode = modes[taskId] ?? "view";
+  const mode = modes[taskId] ?? (notes[taskId] ? "view" : "edit");
   paintViewerActions(taskId, mode);
-  if (mode === "view") {
+  if (mode === "view" && notes[taskId]) {
     const rendered = el("div", "md");
     renderMarkdown(rendered, notes[taskId]);
     viewerBody.append(rendered);
@@ -643,18 +643,46 @@ const initShellControls = (): void => {
 
 // --- Load + poll -------------------------------------------------------------
 
-const reconcile = (): void => {
+const reconcile = (keepId?: string | null): void => {
   ids = Object.keys(notes).sort(
     (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
   );
-  openIds = openIds.filter((id) => notes[id]);
-  if (activeId && (!notes[activeId] || !openIds.includes(activeId))) {
+  openIds = openIds.filter(
+    (id) => notes[id] || drafts[id] !== undefined || (keepId != null && id === keepId),
+  );
+  if (activeId && !openIds.includes(activeId)) {
     activeId = openIds.length > 0 ? openIds[openIds.length - 1] : null;
   }
   if (!activeId && openIds.length === 0 && ids.length > 0) {
     openIds = [ids[0]];
     activeId = ids[0];
   }
+};
+
+/** Consume the rail panel's handoff (`open-note`): open that tab, then clear it. */
+const takeOpenRequest = async (): Promise<string | null> => {
+  try {
+    const value = await host.storage.get("open-note");
+    if (typeof value !== "string" || !value) return null;
+    try {
+      await host.storage.delete("open-note");
+    } catch {
+      // The request is still consumed; a stale key just reopens once more.
+    }
+    return value;
+  } catch {
+    return null;
+  }
+};
+
+const applyOpenRequest = async (): Promise<string | null> => {
+  const requested = await takeOpenRequest();
+  if (!requested) return null;
+  if (!openIds.includes(requested)) openIds.push(requested);
+  activeId = requested;
+  if (!notes[requested] && modes[requested] === undefined) modes[requested] = "edit";
+  await saveUI();
+  return requested;
 };
 
 const renderAll = (): void => {
@@ -696,7 +724,7 @@ const loadAll = async (initial: boolean): Promise<void> => {
     tasks = freshTasks;
     lastUpdated = await readUpdated();
     if (initial) await loadUI();
-    reconcile();
+    reconcile(await applyOpenRequest());
     if (initial) {
       restoreBody();
       initShellControls();
@@ -726,7 +754,7 @@ const pollLocal = async (): Promise<void> => {
     const [freshNotes, freshLastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
     notes = freshNotes;
     lastNoteAt = freshLastNoteAt;
-    reconcile();
+    reconcile(await applyOpenRequest());
     renderAll();
   } catch {
     // Next poll retries.

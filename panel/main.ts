@@ -9,13 +9,11 @@ import type { AttachIssueRequest, GuestConnection, GuestSettings } from "@opench
 import {
   applyHostReady,
   mountBanner,
-  mountButton,
   mountCheckbox,
   mountEmpty,
   mountSearchField,
   mountSpinner,
   mountTabs,
-  mountTextField,
 } from "@openchamber/sdk/ui";
 import type { TabsHandle, Tone } from "@openchamber/sdk/ui";
 import {
@@ -390,9 +388,9 @@ const persistDone = async (
   await recordEvent(action, taskId);
 };
 
-// Local notes, one storage key per task (`note:<id>`), never sent to ClickUp.
+// Local notes live in storage (`note:<id>`); the rail panel only reads them to
+// paint the note icon solid. Editing happens in the ClickUp Notes page.
 const notes: Record<string, string> = {};
-const editingNote = new Set<string>();
 let notesLoaded = false;
 
 const readNotes = async (): Promise<void> => {
@@ -410,17 +408,6 @@ const readNotes = async (): Promise<void> => {
   } catch {
     // Notes are local-only; start empty if storage is unavailable.
   }
-};
-
-const persistNote = async (taskId: string, action: "note-set" | "note-delete"): Promise<void> => {
-  try {
-    const value = notes[taskId];
-    if (value) await host.storage.set(`note:${taskId}`, value);
-    else await host.storage.delete(`note:${taskId}`);
-  } catch {
-    // Ignore; the note stays in memory for this session.
-  }
-  await recordEvent(action, taskId);
 };
 
 // Append-only history with timestamps. Stored only; nothing shows it in the UI.
@@ -529,87 +516,6 @@ const attachTask = (task: ClickUpTask): void => {
     );
 };
 
-type NoteController = { element: HTMLElement; open: () => void };
-
-/** The note block under a row: shows the note, or an editor when opened. */
-const createNote = (task: ClickUpTask, depth: number): NoteController => {
-  const element = el("div", "cu-note-wrap");
-  element.style.setProperty("--cu-indent", `${depth * 14}px`);
-  const paint = () => {
-    element.replaceChildren();
-    const value = notes[task.id] ?? "";
-    if (editingNote.has(task.id)) {
-      let draft = value;
-      const editor = el("div", "cu-note-editor");
-      const fieldHost = el("div");
-      editor.append(fieldHost);
-      active.push(
-        mountTextField(fieldHost, {
-          value,
-          multiline: true,
-          rows: 3,
-          placeholder: "Local markdown note (kept in OpenChamber, not in ClickUp)",
-          onChange: (next) => {
-            draft = next;
-          },
-        }),
-      );
-      const actions = el("div", "cu-note-actions");
-      active.push(
-        mountButton(actions, {
-          label: "Save",
-          size: "xs",
-          onClick: () => {
-            const trimmed = draft.trim();
-            if (trimmed) notes[task.id] = trimmed;
-            else delete notes[task.id];
-            editingNote.delete(task.id);
-            syncNoteButton(task.id);
-            void persistNote(task.id, "note-set");
-            paint();
-          },
-        }),
-        mountButton(actions, {
-          label: "Cancel",
-          variant: "ghost",
-          size: "xs",
-          onClick: () => {
-            editingNote.delete(task.id);
-            paint();
-          },
-        }),
-      );
-      if (value) {
-        active.push(
-          mountButton(actions, {
-            label: "Delete",
-            variant: "destructive",
-            size: "xs",
-            onClick: () => {
-              delete notes[task.id];
-              editingNote.delete(task.id);
-              syncNoteButton(task.id);
-              void persistNote(task.id, "note-delete");
-              paint();
-            },
-          }),
-        );
-      }
-      editor.append(actions);
-      element.append(editor);
-      element.hidden = false;
-      return;
-    }
-    element.hidden = true;
-  };
-  const open = () => {
-    editingNote.add(task.id);
-    paint();
-  };
-  paint();
-  return { element, open };
-};
-
 const NOTE_ICON =
   '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
 
@@ -620,8 +526,25 @@ const syncNoteButton = (taskId: string): void => {
   if (button) button.dataset.has = notes[taskId] ? "true" : "false";
 };
 
-const makeNoteButton = (task: ClickUpTask, onNote: () => void): HTMLButtonElement => {
-  const button = createIconButton("Add or edit note", NOTE_ICON, onNote);
+/** The rail panel has no API to open its own Notes page, so the note button
+ * leaves a handoff (`open-note`) the Notes page consumes, then points there. */
+const openInNotesPage = (task: ClickUpTask): void => {
+  void (async () => {
+    try {
+      await host.storage.set("open-note", task.id);
+      await touchUpdated();
+    } catch {
+      // The toast still points the way; the page just won't preselect the note.
+    }
+    await host.toast({
+      kind: "info",
+      message: `Note for ${shortId(task)} lives in ClickUp Notes — open it from Extension pages.`,
+    });
+  })();
+};
+
+const makeNoteButton = (task: ClickUpTask): HTMLButtonElement => {
+  const button = createIconButton("Open note in ClickUp Notes", NOTE_ICON, () => openInNotesPage(task));
   button.dataset.has = notes[task.id] ? "true" : "false";
   noteButtonByTask.set(task.id, button);
   return button;
@@ -647,7 +570,7 @@ const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
   active.push(handle);
 };
 
-const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLElement => {
+const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
   const row = el("div", "cu-row");
   row.tabIndex = 0;
   row.setAttribute("role", "button");
@@ -685,7 +608,7 @@ const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLEle
   const noteHost = el("span", "cu-note-btn");
   noteHost.addEventListener("click", (event) => event.stopPropagation());
   noteHost.addEventListener("keydown", (event) => event.stopPropagation());
-  noteHost.append(makeNoteButton(task, onNote));
+  noteHost.append(makeNoteButton(task));
   row.append(noteHost);
   row.addEventListener("click", () => attachTask(task));
   row.addEventListener("keydown", (event) => {
@@ -699,8 +622,7 @@ const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLEle
 
 const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, frente: string): void => {
   for (const node of nodes) {
-    const note = createNote(node.task, depth);
-    const row = makeRow(node.task, frente, note.open);
+    const row = makeRow(node.task, frente);
     row.style.setProperty("--cu-indent", `${depth * 14}px`);
     let childrenBox: HTMLElement | null = null;
     if (node.children.length > 0) {
@@ -727,7 +649,6 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
       row.prepend(el("span", "cu-caret-spacer"));
     }
     container.append(row);
-    container.append(note.element);
     if (childrenBox) {
       renderTree(childrenBox, node.children, depth + 1, frente);
       container.append(childrenBox);
