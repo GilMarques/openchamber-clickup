@@ -5,7 +5,9 @@
   "description": "OpenChamber extension: your assigned ClickUp tasks in a simple table.",
   "openchamber": {
     "apiVersion": 1,
-    "engines": { "openchamber": ">=2.0.2" },
+    "engines": {
+      "openchamber": ">=2.0.2"
+    },
     "contributes": {
       "panel": {
         "id": "clickup-tasks",
@@ -13,23 +15,41 @@
         "icon": "task-line",
         "entry": "panel/index.html"
       },
-      "page": { "entry": "panel/index.html", "title": "My ClickUp Tasks" },
+      "page": {
+        "entry": "panel/notes.html",
+        "title": "ClickUp Notes"
+      },
       "attach": "panel",
       "commands": [
-        { "name": "clickup", "description": "Attach a ClickUp task by id, e.g. /clickup ABC-12" }
+        {
+          "name": "clickup",
+          "description": "Attach a ClickUp task by id, e.g. /clickup ABC-12"
+        }
       ],
       "integration": {
         "name": "ClickUp",
         "description": "Your assigned ClickUp tasks.",
         "token": {
           "apiOrigin": "https://api.clickup.com",
-          "account": { "path": "/api/v2/user", "name": "user.username" },
+          "account": {
+            "path": "/api/v2/user",
+            "name": "user.username"
+          },
           "scheme": "raw"
         },
         "settings": [
-          { "id": "team-id", "label": "Workspace (team) ID — optional, auto-detected when empty" },
-          { "id": "frente-folder", "label": "Folder that holds your frentes (default: Frentes)" },
-          { "id": "sprint-field", "label": "Task custom field that holds the sprint (default: Sprints)" }
+          {
+            "id": "team-id",
+            "label": "Workspace (team) ID — optional, auto-detected when empty"
+          },
+          {
+            "id": "frente-folder",
+            "label": "Folder that holds your frentes (default: Frentes)"
+          },
+          {
+            "id": "sprint-field",
+            "label": "Task custom field that holds the sprint (default: Sprints)"
+          }
         ]
       },
       "tools": [
@@ -40,13 +60,21 @@
           "title": "{input.name}",
           "subtitle": "{output.status}",
           "output": "table",
-          "columns": ["name", "status", "assignees", "due_date", "url"]
+          "columns": [
+            "name",
+            "status",
+            "assignees",
+            "due_date",
+            "url"
+          ]
         }
       ]
     }
   },
   "scripts": {
-    "build": "esbuild panel/main.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/main.js",
+    "build": "npm run build:panel && npm run build:notes",
+    "build:panel": "esbuild panel/main.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/main.js",
+    "build:notes": "esbuild panel/notes.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/notes.js",
     "typecheck": "tsc --noEmit",
     "check": "node scripts/check-manifest.mjs",
     "live-check": "bun scripts/live-check.ts"
@@ -55,5 +83,8 @@
     "@openchamber/sdk": "2.0.2",
     "esbuild": "^0.25.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "marked": "^18.0.14"
   }
 }

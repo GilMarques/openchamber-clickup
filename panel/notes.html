@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        box-sizing: border-box;
+      }
+      .bar {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 14px 18px 10px;
+      }
+      .title {
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .count {
+        font-size: 12px;
+        color: var(--oc-muted, inherit);
+      }
+      .spacer {
+        flex: 1 1 auto;
+      }
+      .content {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 0 18px 24px;
+      }
+      .content.cu-center {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        border: 1px solid var(--oc-border, transparent);
+        border-radius: 10px;
+        padding: 14px;
+        margin: 0 0 12px;
+      }
+      .card-title {
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 2px;
+      }
+      .card-title a {
+        color: inherit;
+        text-decoration: none;
+      }
+      .card-title a:hover {
+        text-decoration: underline;
+      }
+      .card-meta {
+        font-size: 12px;
+        color: var(--oc-muted, inherit);
+        margin-bottom: 8px;
+      }
+      .md {
+        font-size: 13px;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+      }
+      .md > :first-child {
+        margin-top: 0;
+      }
+      .md > :last-child {
+        margin-bottom: 0;
+      }
+      .md h1,
+      .md h2,
+      .md h3,
+      .md h4 {
+        margin: 1em 0 0.35em;
+        line-height: 1.3;
+        font-size: 1.08em;
+      }
+      .md h1 {
+        font-size: 1.35em;
+      }
+      .md h2 {
+        font-size: 1.2em;
+      }
+      .md p {
+        margin: 0.5em 0;
+      }
+      .md ul,
+      .md ol {
+        margin: 0.5em 0;
+        padding-left: 1.4em;
+      }
+      .md li {
+        margin: 0.15em 0;
+      }
+      .md code {
+        font-family: var(--oc-mono, monospace);
+        font-size: 0.92em;
+        background: var(--oc-hover, transparent);
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+      }
+      .md pre {
+        background: var(--oc-hover, transparent);
+        padding: 10px;
+        border-radius: 8px;
+        overflow: auto;
+      }
+      .md pre code {
+        background: none;
+        padding: 0;
+      }
+      .md blockquote {
+        margin: 0.6em 0;
+        padding: 0.1em 0.9em;
+        border-left: 3px solid var(--oc-border, currentColor);
+        color: var(--oc-muted, inherit);
+      }
+      .md a {
+        color: var(--oc-primary, inherit);
+      }
+      .md hr {
+        border: 0;
+        border-top: 1px solid var(--oc-border, currentColor);
+        margin: 1em 0;
+      }
+      .md table {
+        border-collapse: collapse;
+      }
+      .md th,
+      .md td {
+        border: 1px solid var(--oc-border, currentColor);
+        padding: 4px 8px;
+      }
+      .md img {
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="notes.js"></script>
+  </body>
+</html>

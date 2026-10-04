@@ -76,8 +76,14 @@ The panel also re-reads on a forced refresh (the refresh icon).
 
 ## Notes
 
+- Notes are **markdown**. Write markdown in a note and it renders on the
+  **ClickUp Notes** page (main area → **Extension pages**). Keep agent-written
+  notes markdown so they render.
 - The panel groups by frente, orders by sprint, shows a workflow-status dot, a
   priority badge, expandable subtasks, a done checkbox, and a note icon that
   turns solid when a note exists.
+- The Files panel cannot be driven: the guest API has no "open file" call in
+  OpenChamber 2.0.2, and `contributes.fileEditors` only exists from 2.0.4. Use
+  the ClickUp Notes page instead.
 - Source, docs, and the same CLI/MCP live in the repo
   `github.com/GilMarques/openchamber-clickup`.

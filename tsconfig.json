@@ -12,5 +12,5 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["panel/main.ts"]
+  "include": ["panel/main.ts", "panel/notes.ts"]
 }

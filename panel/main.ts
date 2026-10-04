@@ -550,7 +550,7 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
           value,
           multiline: true,
           rows: 3,
-          placeholder: "Local note (kept in OpenChamber, not in ClickUp)",
+          placeholder: "Local markdown note (kept in OpenChamber, not in ClickUp)",
           onChange: (next) => {
             draft = next;
           },

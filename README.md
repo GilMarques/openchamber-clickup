@@ -45,7 +45,12 @@ install prompt has nothing to approve.
 - Click a task to **attach it to the chat** as a chip, with status, list, due
   date, and URL as context for the agent.
 - A `/clickup ABC-12` **slash command** to attach a task by id.
-- A **full-screen page** ("My ClickUp Tasks") from the Extension pages menu.
+- A **ClickUp Notes** full-screen page from the Extension pages menu in the main
+  area: every local note rendered as **markdown**, newest first, with the task
+  title, sprint, status, list, and the time the note was last saved. Links open
+  in the browser; raw HTML in a note is stripped before it renders.
+- A **full-screen panel page** is the same rail panel, opened from the Extension
+  pages menu.
 
 ## Install
 
@@ -195,6 +200,27 @@ without re-pasting. Prefer local notes/ticks so AI text never lands in ClickUp.
 
 `skills/clickup-tasks/SKILL.md` documents this contract for agent sessions; it is
 symlinked into `~/.config/opencode/skills/clickup-tasks`.
+
+### Notes are markdown
+
+Notes are plain text — write markdown in the note editor and the **ClickUp
+Notes** page (Extension pages menu) renders it: headings, lists, code, quotes,
+links, tables. It needs no extra permission.
+
+### Why not the Files panel?
+
+Research on OpenChamber 2.0.2 (this repo's SDK):
+
+- The guest API has **no "open file" call** — only `openCommit` (Diff view) and
+  `openUrl`. So an extension cannot make the Files panel open a file.
+- `contributes.fileEditors` (an extension-provided editor inside Files) landed
+  in the SDK **after** 2.0.2; it is absent from the 2.0.2 manifest.
+- `contributes.page`, which this uses, is the supported way to get a full-screen
+  tab in the main area.
+
+So the markdown tab is ours rather than the Files viewer. On OpenChamber 2.0.4+
+we could also register a `fileEditors` entry for a notes `.md` file so it opens
+your editor from Files; the file would still need to exist in the project.
 
 ## Develop
 

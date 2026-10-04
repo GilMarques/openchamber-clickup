@@ -2280,7 +2280,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
             value,
             multiline: true,
             rows: 3,
-            placeholder: "Local note (kept in OpenChamber, not in ClickUp)",
+            placeholder: "Local markdown note (kept in OpenChamber, not in ClickUp)",
             onChange: (next) => {
               draft = next;
             }
