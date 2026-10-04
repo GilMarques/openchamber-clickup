@@ -141,6 +141,22 @@
         flex-direction: column;
       }
       .cu-title {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+      }
+      .cu-id {
+        flex: 0 0 auto;
+        font-family: var(--oc-mono, monospace);
+        font-size: 11px;
+        color: var(--oc-muted, inherit);
+      }
+      .cu-name {
+        flex: 1 1 auto;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -226,7 +242,8 @@
         display: inline-flex;
         align-items: center;
       }
-      .cu-row.cu-done .cu-title {
+      .cu-row.cu-done .cu-id,
+      .cu-row.cu-done .cu-name {
         text-decoration: line-through;
         color: var(--oc-muted, inherit);
       }

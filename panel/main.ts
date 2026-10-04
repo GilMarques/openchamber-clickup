@@ -674,7 +674,11 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
   makeDoneCheckbox(task, row);
   const main = el("div", "cu-main");
   const title = el("div", "cu-title");
-  title.textContent = task.name || "(untitled)";
+  const idSpan = el("span", "cu-id");
+  idSpan.textContent = shortId(task);
+  const nameSpan = el("span", "cu-name");
+  nameSpan.textContent = task.name || "(untitled)";
+  title.append(idSpan, document.createTextNode(" "), nameSpan);
   main.append(title);
   const subtitle = sprintLabel(task, frente, sprintField());
   const priority = task.priority?.priority;
