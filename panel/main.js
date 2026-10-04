@@ -1779,6 +1779,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     settings: {},
     filter: "open",
     query: "",
+    frenteFilter: null,
     tasks: [],
     status: { kind: "idle" }
   };
@@ -1805,10 +1806,17 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   var tools = el2("div", "tools");
   var searchHost = el2("div");
   var tabsHost = el2("div");
-  tools.append(searchHost, tabsHost);
+  var frenteRow = el2("div", "frente-row");
+  var frenteLabel = el2("span", "frente-label");
+  frenteLabel.textContent = "Frentes";
+  var frenteTabsHost = el2("div", "frente-tabs");
+  frenteRow.append(frenteLabel, frenteTabsHost);
+  frenteRow.hidden = true;
+  tools.append(searchHost, tabsHost, frenteRow);
   var content = el2("div", "content");
   root.append(bar, sub, tools, content);
   var refreshButton = null;
+  var frenteTabs = null;
   var active2 = [];
   var clearContent = () => {
     for (const handle of active2) handle.dispose();
@@ -1835,6 +1843,15 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       state.filter = id;
       tabs.update({ activeId: id });
       void load(false);
+    }
+  });
+  frenteTabs = mountTabs(frenteTabsHost, {
+    items: [],
+    activeId: "all",
+    onChange: (id) => {
+      state.frenteFilter = id === "all" ? null : id.replace(/^f:/, "");
+      frenteTabs?.update({ activeId: id });
+      renderContent();
     }
   });
   refreshButton = mountButton(refreshHost, {
@@ -1939,7 +1956,28 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   };
   var frenteFolder = () => state.settings["frente-folder"]?.trim() || "Frentes";
   var sprintField = () => state.settings["sprint-field"]?.trim() || "Sprints";
-  var expanded = /* @__PURE__ */ new Set();
+  var renderFrenteTabs = (tasks, frente) => {
+    const frentes = buildGroups(tasks, frente).filter((group) => group.frente);
+    if (frentes.length === 0) {
+      state.frenteFilter = null;
+      frenteRow.hidden = true;
+      frenteTabs?.update({ items: [], activeId: "all" });
+      return;
+    }
+    const labels = new Set(frentes.map((group) => group.label));
+    if (state.frenteFilter && !labels.has(state.frenteFilter)) state.frenteFilter = null;
+    const items = [
+      { id: "all", label: "All", count: tasks.length },
+      ...frentes.map((group) => ({
+        id: `f:${group.label}`,
+        label: group.label,
+        count: group.tasks.length
+      }))
+    ];
+    frenteRow.hidden = false;
+    frenteTabs?.update({ items, activeId: state.frenteFilter ? `f:${state.frenteFilter}` : "all" });
+  };
+  var collapsed = /* @__PURE__ */ new Set();
   var rowSubtitle = (task, frente) => (isFrenteTask(task, frente) ? resolveCustomField(task, sprintField()) : task.list?.name) ?? void 0;
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
@@ -2019,7 +2057,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       let childrenBox = null;
       if (node.children.length > 0) {
         childrenBox = el2("div", "cu-children");
-        const isOpen = expanded.has(node.task.id);
+        const isOpen = !collapsed.has(node.task.id);
         childrenBox.hidden = !isOpen;
         const caret = el2("button", "cu-caret");
         caret.type = "button";
@@ -2028,9 +2066,9 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         caret.setAttribute("aria-label", isOpen ? "Collapse subtasks" : "Expand subtasks");
         caret.addEventListener("click", (event) => {
           event.stopPropagation();
-          const open = expanded.has(node.task.id);
-          if (open) expanded.delete(node.task.id);
-          else expanded.add(node.task.id);
+          const open = !collapsed.has(node.task.id);
+          if (open) collapsed.add(node.task.id);
+          else collapsed.delete(node.task.id);
           caret.textContent = open ? "\u25B8" : "\u25BE";
           caret.setAttribute("aria-expanded", String(!open));
           caret.setAttribute("aria-label", open ? "Expand subtasks" : "Collapse subtasks");
@@ -2055,6 +2093,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   };
   var renderContent = () => {
     clearContent();
+    frenteRow.hidden = true;
     if (!state.connected) {
       active2.push(
         mountEmpty(content, {
@@ -2080,6 +2119,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       return;
     }
     const tasks = visibleTasks();
+    const frente = frenteFolder();
+    renderFrenteTabs(tasks, frente);
     if (tasks.length === 0) {
       active2.push(
         mountEmpty(content, {
@@ -2089,8 +2130,19 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       );
       return;
     }
-    const frente = frenteFolder();
-    for (const group of buildGroups(tasks, frente)) {
+    const groups = buildGroups(tasks, frente).filter(
+      (group) => !state.frenteFilter || group.label === state.frenteFilter
+    );
+    if (groups.length === 0) {
+      active2.push(
+        mountEmpty(content, {
+          title: `No open tasks in ${state.frenteFilter}`,
+          body: "Switch the Frentes tab or clear the filter."
+        })
+      );
+      return;
+    }
+    for (const group of groups) {
       const header = el2("div", "group");
       const name = el2("span", "group-name");
       name.textContent = group.label;

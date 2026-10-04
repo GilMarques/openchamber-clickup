@@ -87,6 +87,12 @@ for (const group of buildGroups(viaPanel, "Frentes")) {
   console.log(`  ${group.label} (${group.tasks.length})`);
 }
 
+const frentes = buildGroups(viaPanel, "Frentes").filter((group) => group.frente);
+console.log(
+  "\nfrente tabs: " +
+    ["All", ...frentes.map((group) => `${group.label} (${group.tasks.length})`)].join("  |  "),
+);
+
 const countNodes = (nodes: TreeNode[]): number =>
   nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
 const tree = buildTree(viaPanel);

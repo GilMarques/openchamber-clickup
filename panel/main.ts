@@ -15,7 +15,7 @@ import {
   mountSpinner,
   mountTabs,
 } from "@openchamber/sdk/ui";
-import type { ButtonHandle, Tone } from "@openchamber/sdk/ui";
+import type { ButtonHandle, TabsHandle, Tone } from "@openchamber/sdk/ui";
 import {
   buildGroups,
   buildTree,
@@ -46,6 +46,7 @@ type State = {
   settings: GuestSettings;
   filter: Filter;
   query: string;
+  frenteFilter: string | null;
   tasks: ClickUpTask[];
   status: LoadStatus;
 };
@@ -60,6 +61,7 @@ const state: State = {
   settings: {},
   filter: "open",
   query: "",
+  frenteFilter: null,
   tasks: [],
   status: { kind: "idle" },
 };
@@ -93,11 +95,18 @@ const sub = el("div", "sub");
 const tools = el("div", "tools");
 const searchHost = el("div");
 const tabsHost = el("div");
-tools.append(searchHost, tabsHost);
+const frenteRow = el("div", "frente-row");
+const frenteLabel = el("span", "frente-label");
+frenteLabel.textContent = "Frentes";
+const frenteTabsHost = el("div", "frente-tabs");
+frenteRow.append(frenteLabel, frenteTabsHost);
+frenteRow.hidden = true;
+tools.append(searchHost, tabsHost, frenteRow);
 const content = el("div", "content");
 root.append(bar, sub, tools, content);
 
 let refreshButton: ButtonHandle | null = null;
+let frenteTabs: TabsHandle | null = null;
 let active: Array<{ dispose: () => void }> = [];
 
 const clearContent = () => {
@@ -127,6 +136,16 @@ const tabs = mountTabs(tabsHost, {
     state.filter = id;
     tabs.update({ activeId: id });
     void load(false);
+  },
+});
+
+frenteTabs = mountTabs(frenteTabsHost, {
+  items: [],
+  activeId: "all",
+  onChange: (id) => {
+    state.frenteFilter = id === "all" ? null : id.replace(/^f:/, "");
+    frenteTabs?.update({ activeId: id });
+    renderContent();
   },
 });
 
@@ -254,9 +273,32 @@ const visibleTasks = (): ClickUpTask[] => {
 const frenteFolder = (): string => state.settings["frente-folder"]?.trim() || "Frentes";
 const sprintField = (): string => state.settings["sprint-field"]?.trim() || "Sprints";
 
+/** Fill the Frentes tab row from the tasks in hand; hide it when there are none. */
+const renderFrenteTabs = (tasks: ClickUpTask[], frente: string): void => {
+  const frentes = buildGroups(tasks, frente).filter((group) => group.frente);
+  if (frentes.length === 0) {
+    state.frenteFilter = null;
+    frenteRow.hidden = true;
+    frenteTabs?.update({ items: [], activeId: "all" });
+    return;
+  }
+  const labels = new Set(frentes.map((group) => group.label));
+  if (state.frenteFilter && !labels.has(state.frenteFilter)) state.frenteFilter = null;
+  const items = [
+    { id: "all", label: "All", count: tasks.length },
+    ...frentes.map((group) => ({
+      id: `f:${group.label}`,
+      label: group.label,
+      count: group.tasks.length,
+    })),
+  ];
+  frenteRow.hidden = false;
+  frenteTabs?.update({ items, activeId: state.frenteFilter ? `f:${state.frenteFilter}` : "all" });
+};
+
 // --- Rows with expandable subtasks ------------------------------------------
 
-const expanded = new Set<string>();
+const collapsed = new Set<string>();
 
 const rowSubtitle = (task: ClickUpTask, frente: string): string | undefined =>
   (isFrenteTask(task, frente) ? resolveCustomField(task, sprintField()) : task.list?.name) ?? undefined;
@@ -346,7 +388,7 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
     let childrenBox: HTMLElement | null = null;
     if (node.children.length > 0) {
       childrenBox = el("div", "cu-children");
-      const isOpen = expanded.has(node.task.id);
+      const isOpen = !collapsed.has(node.task.id);
       childrenBox.hidden = !isOpen;
       const caret = el("button", "cu-caret");
       caret.type = "button";
@@ -355,9 +397,9 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
       caret.setAttribute("aria-label", isOpen ? "Collapse subtasks" : "Expand subtasks");
       caret.addEventListener("click", (event) => {
         event.stopPropagation();
-        const open = expanded.has(node.task.id);
-        if (open) expanded.delete(node.task.id);
-        else expanded.add(node.task.id);
+        const open = !collapsed.has(node.task.id);
+        if (open) collapsed.add(node.task.id);
+        else collapsed.delete(node.task.id);
         caret.textContent = open ? "▸" : "▾";
         caret.setAttribute("aria-expanded", String(!open));
         caret.setAttribute("aria-label", open ? "Expand subtasks" : "Collapse subtasks");
@@ -386,6 +428,7 @@ const renderHeader = () => {
 
 const renderContent = () => {
   clearContent();
+  frenteRow.hidden = true;
   if (!state.connected) {
     active.push(
       mountEmpty(content, {
@@ -411,6 +454,8 @@ const renderContent = () => {
     return;
   }
   const tasks = visibleTasks();
+  const frente = frenteFolder();
+  renderFrenteTabs(tasks, frente);
   if (tasks.length === 0) {
     active.push(
       mountEmpty(content, {
@@ -424,8 +469,19 @@ const renderContent = () => {
     );
     return;
   }
-  const frente = frenteFolder();
-  for (const group of buildGroups(tasks, frente)) {
+  const groups = buildGroups(tasks, frente).filter(
+    (group) => !state.frenteFilter || group.label === state.frenteFilter,
+  );
+  if (groups.length === 0) {
+    active.push(
+      mountEmpty(content, {
+        title: `No open tasks in ${state.frenteFilter}`,
+        body: "Switch the Frentes tab or clear the filter.",
+      }),
+    );
+    return;
+  }
+  for (const group of groups) {
     const header = el("div", "group");
     const name = el("span", "group-name");
     name.textContent = group.label;

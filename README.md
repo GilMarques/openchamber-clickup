@@ -18,10 +18,14 @@ install prompt has nothing to approve.
 - A **panel** on the right-hand rail listing your assigned tasks, **grouped by
   frente** (the list under your Frentes folder) with the sprint shown on each
   row. Tasks that have no frente sit under a `<folder> (no frente)` heading.
-- A **caret** on each task that has subtasks. Click it to expand the subtasks
-  nested underneath (deeper levels nest too); click a row to attach that task to
-  the chat. A task without subtasks keeps the caret space empty so titles line
-  up. The task id is in the row's tooltip.
+- A **caret** on each task that has subtasks. Subtasks are **expanded by
+  default**; click the caret (▾) to collapse them and (▸) to expand again.
+  Deeper levels nest too. Click a row to attach that task to the chat. A task
+  without subtasks keeps the caret space empty so titles line up. The task id is
+  in the row's tooltip.
+- A **Frentes filter row** under the Open/All tabs: `All` plus one tab per
+  frente (with task counts). Pick a frente to show only its tasks; the tabs
+  update with the Open/All and search filters.
 - The **workflow status** (for example `peer qa (stage)`, `sprint commitment`,
   `in progress`) as a coloured badge, using the status's own ClickUp colour.
   The **sprint** is the row's sub-label, and the priority badge and due date stay
