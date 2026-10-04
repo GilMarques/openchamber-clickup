@@ -113,6 +113,7 @@ const clearContent = () => {
   for (const handle of active) handle.dispose();
   active = [];
   content.replaceChildren();
+  content.classList.remove("cu-center");
 };
 
 mountSearchField(searchHost, {
@@ -428,6 +429,7 @@ const renderContent = () => {
     return;
   }
   if (state.status.kind === "loading" && state.tasks.length === 0) {
+    content.classList.add("cu-center");
     active.push(mountSpinner(content, { label: "Loading tasks" }));
     return;
   }

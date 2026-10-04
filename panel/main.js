@@ -1836,6 +1836,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     for (const handle of active2) handle.dispose();
     active2 = [];
     content.replaceChildren();
+    content.classList.remove("cu-center");
   };
   mountSearchField(searchHost, {
     value: "",
@@ -2108,6 +2109,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       return;
     }
     if (state.status.kind === "loading" && state.tasks.length === 0) {
+      content.classList.add("cu-center");
       active2.push(mountSpinner(content, { label: "Loading tasks" }));
       return;
     }
