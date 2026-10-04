@@ -1993,7 +1993,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     frenteTabs?.update({ items, activeId: state.frenteFilter ? `f:${state.frenteFilter}` : "all" });
   };
   var collapsed = /* @__PURE__ */ new Set();
-  var rowSubtitle = (task, frente) => sprintLabel(task, frente, sprintField()) || void 0;
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
     if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -2030,20 +2029,24 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     const title2 = el2("div", "cu-title");
     title2.textContent = task.name || "(untitled)";
     main.append(title2);
-    const subtitle = rowSubtitle(task, frente);
-    if (subtitle) {
+    const subtitle = sprintLabel(task, frente, sprintField());
+    const priority = task.priority?.priority;
+    if (subtitle || priority) {
       const subEl = el2("div", "cu-sub");
-      subEl.textContent = subtitle;
+      if (subtitle) {
+        const sprintText = el2("span", "cu-sub-text");
+        sprintText.textContent = subtitle;
+        subEl.append(sprintText);
+      }
+      if (priority) {
+        const badge = el2("span", "cu-badge cu-badge-sm");
+        badge.textContent = priority;
+        badge.dataset.tone = priorityTone(priority);
+        subEl.append(badge);
+      }
       main.append(subEl);
     }
     row.append(main);
-    const priority = task.priority?.priority;
-    if (priority) {
-      const badge = el2("span", "cu-badge");
-      badge.textContent = priority;
-      badge.dataset.tone = priorityTone(priority);
-      row.append(badge);
-    }
     const statusDot = makeStatusDot(task);
     if (statusDot) row.append(statusDot);
     const due = formatDue(task);

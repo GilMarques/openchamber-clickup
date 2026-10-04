@@ -142,11 +142,22 @@
         white-space: nowrap;
       }
       .cu-sub {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        font-size: 0.75rem;
+        color: var(--oc-muted, inherit);
+      }
+      .cu-sub-text {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 0.75rem;
-        color: var(--oc-muted, inherit);
+      }
+      .cu-badge-sm {
+        padding: 0 5px;
+        font-size: 10px;
+        line-height: 15px;
       }
       .cu-meta {
         flex: 0 0 auto;

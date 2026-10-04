@@ -301,9 +301,6 @@ const renderFrenteTabs = (tasks: ClickUpTask[], frente: string): void => {
 
 const collapsed = new Set<string>();
 
-const rowSubtitle = (task: ClickUpTask, frente: string): string | undefined =>
-  sprintLabel(task, frente, sprintField()) || undefined;
-
 const statusTone = (status: string, type: string | undefined): Tone => {
   const value = status.toLowerCase();
   if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -346,20 +343,24 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
   const title = el("div", "cu-title");
   title.textContent = task.name || "(untitled)";
   main.append(title);
-  const subtitle = rowSubtitle(task, frente);
-  if (subtitle) {
+  const subtitle = sprintLabel(task, frente, sprintField());
+  const priority = task.priority?.priority;
+  if (subtitle || priority) {
     const subEl = el("div", "cu-sub");
-    subEl.textContent = subtitle;
+    if (subtitle) {
+      const sprintText = el("span", "cu-sub-text");
+      sprintText.textContent = subtitle;
+      subEl.append(sprintText);
+    }
+    if (priority) {
+      const badge = el("span", "cu-badge cu-badge-sm");
+      badge.textContent = priority;
+      badge.dataset.tone = priorityTone(priority);
+      subEl.append(badge);
+    }
     main.append(subEl);
   }
   row.append(main);
-  const priority = task.priority?.priority;
-  if (priority) {
-    const badge = el("span", "cu-badge");
-    badge.textContent = priority;
-    badge.dataset.tone = priorityTone(priority);
-    row.append(badge);
-  }
   const statusDot = makeStatusDot(task);
   if (statusDot) row.append(statusDot);
   const due = formatDue(task);
