@@ -2262,6 +2262,16 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     paint();
     return { element, open };
   };
+  var NOTE_ICON = '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
+  var makeNoteButton = (onNote) => {
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "cu-icon-btn";
+    button2.setAttribute("aria-label", "Add or edit note");
+    button2.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICON}</svg>`;
+    button2.addEventListener("click", onNote);
+    return button2;
+  };
   var makeDoneCheckbox = (task, row) => {
     const wrap = el2("span", "cu-check");
     wrap.addEventListener("click", (event) => event.stopPropagation());
@@ -2317,8 +2327,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     const noteHost = el2("span", "cu-note-btn");
     noteHost.addEventListener("click", (event) => event.stopPropagation());
     noteHost.addEventListener("keydown", (event) => event.stopPropagation());
+    noteHost.append(makeNoteButton(onNote));
     row.append(noteHost);
-    active2.push(mountButton(noteHost, { label: "note", variant: "ghost", size: "xs", onClick: onNote }));
     makeDoneCheckbox(task, row);
     row.addEventListener("click", () => attachTask(task));
     row.addEventListener("keydown", (event) => {

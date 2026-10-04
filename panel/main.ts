@@ -504,6 +504,21 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
   return { element, open };
 };
 
+const NOTE_ICON =
+  '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
+
+const makeNoteButton = (onNote: () => void): HTMLButtonElement => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "cu-icon-btn";
+  button.setAttribute("aria-label", "Add or edit note");
+  button.innerHTML =
+    `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
+    `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICON}</svg>`;
+  button.addEventListener("click", onNote);
+  return button;
+};
+
 const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
   const wrap = el("span", "cu-check");
   wrap.addEventListener("click", (event) => event.stopPropagation());
@@ -560,8 +575,8 @@ const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLEle
   const noteHost = el("span", "cu-note-btn");
   noteHost.addEventListener("click", (event) => event.stopPropagation());
   noteHost.addEventListener("keydown", (event) => event.stopPropagation());
+  noteHost.append(makeNoteButton(onNote));
   row.append(noteHost);
-  active.push(mountButton(noteHost, { label: "note", variant: "ghost", size: "xs", onClick: onNote }));
   makeDoneCheckbox(task, row);
   row.addEventListener("click", () => attachTask(task));
   row.addEventListener("keydown", (event) => {

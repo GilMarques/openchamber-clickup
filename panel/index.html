@@ -230,6 +230,27 @@
         flex: 0 0 auto;
         display: inline-flex;
       }
+      .cu-icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: var(--oc-muted, inherit);
+        cursor: pointer;
+      }
+      .cu-icon-btn:hover {
+        background: var(--oc-hover, transparent);
+        color: var(--oc-fg, inherit);
+      }
+      .cu-icon-btn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--oc-focus, currentColor);
+      }
       .cu-note-wrap {
         padding: 0 8px 6px calc(32px + var(--cu-indent, 0px));
       }
