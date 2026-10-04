@@ -150,6 +150,16 @@ const readUpdated = async (): Promise<string | null> => {
   }
 };
 
+const touchUpdated = async (): Promise<void> => {
+  const stamp = String(Date.now());
+  lastUpdated = stamp;
+  try {
+    await host.storage.set("updated", stamp);
+  } catch {
+    // Ignore; polling simply will not see this particular write.
+  }
+};
+
 const loadTasks = async (): Promise<Map<string, ClickUpTask>> => {
   const me = await requestJson<{ user: { id: number } }>("/api/v2/user");
   const teams = await requestJson<{ teams: Array<{ id: string | number }> }>("/api/v2/team");
@@ -182,10 +192,10 @@ const persistNote = async (taskId: string, text: string): Promise<void> => {
   pushEvent(events, trimmed ? "note-set" : "note-delete", taskId);
   try {
     await host.storage.set("events", events);
-    await host.storage.set("updated", String(Date.now()));
   } catch {
     // Best-effort history.
   }
+  await touchUpdated();
 };
 
 const saveUI = async (): Promise<void> => {
@@ -194,6 +204,22 @@ const saveUI = async (): Promise<void> => {
   } catch {
     // UI prefs are best-effort.
   }
+  await touchUpdated();
+};
+
+const readStoredTabs = async (): Promise<string[] | null> => {
+  try {
+    const ui = await host.storage.get("notes-ui");
+    if (ui && typeof ui === "object" && !Array.isArray(ui)) {
+      const stored = (ui as { openIds?: unknown }).openIds;
+      if (Array.isArray(stored)) {
+        return stored.filter((id): id is string => typeof id === "string");
+      }
+    }
+  } catch {
+    // Best-effort.
+  }
+  return null;
 };
 
 const loadUI = async (): Promise<void> => {
@@ -587,9 +613,12 @@ const reconcile = (): void => {
     (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
   );
   openIds = openIds.filter((id) => notes[id] || drafts[id] !== undefined);
-  if (activeId && (!notes[activeId] || !openIds.includes(activeId))) {
+  if (activeId && !openIds.includes(activeId)) {
     activeId = openIds.length > 0 ? openIds[openIds.length - 1] : null;
   }
+};
+
+const ensureSelection = (): void => {
   if (!activeId && openIds.length === 0 && ids.length > 0) {
     openIds = [ids[0]];
     activeId = ids[0];
@@ -636,6 +665,7 @@ const loadAll = async (initial: boolean): Promise<void> => {
     lastUpdated = await readUpdated();
     if (initial) await loadUI();
     reconcile();
+    ensureSelection();
     if (initial) {
       restoreBody();
       initShellControls();
@@ -665,6 +695,8 @@ const pollLocal = async (): Promise<void> => {
     const [freshNotes, freshLastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
     notes = freshNotes;
     lastNoteAt = freshLastNoteAt;
+    const storedTabs = await readStoredTabs();
+    if (storedTabs) openIds = storedTabs;
     reconcile();
     renderAll();
   } catch {

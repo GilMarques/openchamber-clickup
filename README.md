@@ -33,10 +33,13 @@ install prompt has nothing to approve.
   kept, so a new day starts unticked.
 - A **local note** on each task: click the note icon on a row and the whole panel
   swaps to a markdown editor for that note, with a back button to the task list.
-  Notes live in the extension's own storage (key `note:<taskId>`) and are **never
-  sent to ClickUp**, so pasted AI text stays out of your workspace. A saved note
-  is not shown in the list — the row's note icon turns **solid** so you can tell
-  one exists.
+  Open notes also appear as a **tabs row** under the header (like the Files
+  panel's tabs): click a tab to jump to that note, × to close it. The tabs are
+  shared with the **ClickUp Notes** page, so notes opened in either surface show
+  up in both. Notes live in the extension's own storage (key `note:<taskId>`) and
+  are **never sent to ClickUp**, so pasted AI text stays out of your workspace.
+  A saved note is not shown in the list — the row's note icon turns **solid** so
+  you can tell one exists.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible

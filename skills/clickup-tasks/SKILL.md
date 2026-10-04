@@ -83,7 +83,9 @@ The panel also re-reads on a forced refresh (the refresh icon).
   priority badge, expandable subtasks, a done checkbox, and a note icon that
   turns solid when a note exists. Clicking the note icon swaps the whole panel
   for a CodeMirror markdown editor for that note, with a back button to the task
-  list; there is no inline editor under the row.
+  list; there is no inline editor under the row. Open notes also appear as a
+  tabs row under the header, shared with the ClickUp Notes page through
+  `notes-ui.openIds`.
 - The Files panel cannot be driven: the guest API has no "open file" call in
   OpenChamber 2.0.2, and `contributes.fileEditors` only exists from 2.0.4. Use
   the ClickUp Notes page.

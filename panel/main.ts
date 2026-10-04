@@ -109,8 +109,10 @@ const frenteTabsHost = el("div", "frente-tabs");
 frenteRow.append(frenteTabsHost);
 frenteRow.hidden = true;
 tools.append(searchHost, frenteRow);
+const openTabsRow = el("div", "cu-otabs");
+openTabsRow.setAttribute("role", "tablist");
 const content = el("div", "content");
-root.append(bar, tools, content);
+root.append(bar, openTabsRow, tools, content);
 
 const REFRESH_ICON = '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>';
 
@@ -360,8 +362,93 @@ const touchUpdated = async (): Promise<void> => {
   }
 };
 
-const readDone = async (): Promise<void> => {
-  if (!doneLoaded) {
+// Open-note tabs, shared with the Notes page through `notes-ui.openIds`.
+// The rail only reads/writes the openIds field; the page owns the rest.
+let openTabIds: string[] = [];
+
+const readOpenTabs = async (): Promise<string[]> => {
+  try {
+    const ui = await host.storage.get("notes-ui");
+    if (ui && typeof ui === "object" && !Array.isArray(ui)) {
+      const ids = (ui as { openIds?: unknown }).openIds;
+      if (Array.isArray(ids)) return ids.filter((id): id is string => typeof id === "string");
+    }
+  } catch {
+    // Tabs are best-effort.
+  }
+  return [];
+};
+
+const writeOpenTabs = async (ids: string[]): Promise<void> => {
+  try {
+    const raw = await host.storage.get("notes-ui");
+    const base =
+      raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    await host.storage.set("notes-ui", { ...base, openIds: ids });
+  } catch {
+    // Best-effort; tabs still work locally until the next write.
+  }
+  await touchUpdated();
+};
+
+const taskName = (taskId: string): string =>
+  state.tasks.find((entry) => entry.id === taskId)?.name || taskId;
+
+const renderOpenTabs = (): void => {
+  openTabsRow.replaceChildren();
+  if (openTabIds.length === 0) {
+    openTabsRow.hidden = true;
+    return;
+  }
+  openTabsRow.hidden = false;
+  for (const taskId of openTabIds) {
+    const tab = el("button", "cu-otab");
+    tab.type = "button";
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(taskId === editingNoteId));
+    if (taskId === editingNoteId) tab.classList.add("active");
+    const label = el("span", "cu-otab-label");
+    label.textContent = taskName(taskId);
+    label.title = taskName(taskId);
+    tab.append(label);
+    const close = el("button", "cu-otab-close");
+    close.type = "button";
+    close.textContent = "×";
+    close.setAttribute("aria-label", `Close ${taskName(taskId)}`);
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void closeNoteTab(taskId);
+    });
+    tab.append(close);
+    tab.addEventListener("click", () => {
+      if (editingNoteId !== taskId) {
+        editingNoteId = taskId;
+        content.scrollTop = 0;
+        renderContent();
+      }
+    });
+    openTabsRow.append(tab);
+  }
+};
+
+const openNoteTab = async (taskId: string): Promise<void> => {
+  if (!openTabIds.includes(taskId)) {
+    openTabIds.push(taskId);
+    await writeOpenTabs(openTabIds);
+  }
+  editingNoteId = taskId;
+  content.scrollTop = 0;
+  renderContent();
+};
+
+const closeNoteTab = async (taskId: string): Promise<void> => {
+  openTabIds = openTabIds.filter((id) => id !== taskId);
+  if (editingNoteId === taskId) editingNoteId = null;
+  await writeOpenTabs(openTabIds);
+  renderContent();
+};
+
+const readDone = async (): Promise<void> => {  if (!doneLoaded) {
     try {
       doneByDate = parseDone(await host.storage.get("done"));
     } catch {
@@ -474,6 +561,8 @@ const pollLocal = async (): Promise<void> => {
   resetLocal();
   await readDone();
   await readNotes();
+  openTabIds = (await readOpenTabs()).filter((id) => notes[id] || id === editingNoteId);
+  if (editingNoteId && !openTabIds.includes(editingNoteId)) openTabIds.push(editingNoteId);
   if (editingNoteId) return;
   if (state.connected && state.status.kind === "idle") {
     const top = content.scrollTop;
@@ -546,11 +635,7 @@ const persistPanelNote = async (taskId: string, text: string): Promise<void> => 
 };
 
 const makeNoteButton = (task: ClickUpTask): HTMLButtonElement => {
-  const button = createIconButton("Edit note", NOTE_ICON, () => {
-    editingNoteId = task.id;
-    content.scrollTop = 0;
-    renderContent();
-  });
+  const button = createIconButton("Edit note", NOTE_ICON, () => void openNoteTab(task.id));
   button.dataset.has = notes[task.id] ? "true" : "false";
   noteButtonByTask.set(task.id, button);
   return button;
@@ -604,7 +689,15 @@ const renderNoteView = (task: ClickUpTask): void => {
       label: "Cancel",
       variant: "ghost",
       size: "xs",
-      onClick: close,
+      onClick: () => {
+        void (async () => {
+          if (!notes[task.id]) {
+            openTabIds = openTabIds.filter((id) => id !== task.id);
+            await writeOpenTabs(openTabIds);
+          }
+          close();
+        })();
+      },
     }),
   );
   if (notes[task.id]) {
@@ -623,6 +716,8 @@ const renderNoteView = (task: ClickUpTask): void => {
             });
             return;
           }
+          openTabIds = openTabIds.filter((id) => id !== task.id);
+          await writeOpenTabs(openTabIds);
           close();
         },
       }),
@@ -744,6 +839,7 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
 const renderContent = () => {
   destroyPanelEditor();
   clearContent();
+  renderOpenTabs();
   if (editingNoteId) {
     const task = state.tasks.find((entry) => entry.id === editingNoteId);
     if (task) {
@@ -840,6 +936,8 @@ const load = async (force: boolean): Promise<void> => {
     }
     await readDone();
     await readNotes();
+    openTabIds = (await readOpenTabs()).filter((id) => notes[id] || id === editingNoteId);
+    if (editingNoteId && !openTabIds.includes(editingNoteId)) openTabIds.push(editingNoteId);
     await readEvents();
     lastUpdated = await readUpdated();
     await ensureContext();
