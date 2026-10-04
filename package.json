@@ -73,7 +73,7 @@
   },
   "scripts": {
     "build": "npm run build:panel && npm run build:notes",
-    "build:panel": "esbuild panel/main.ts --bundle --format=iife --platform=browser --target=es2020 --outfile=panel/main.js",
+    "build:panel": "esbuild panel/main.ts --bundle --minify --format=iife --platform=browser --target=es2020 --outfile=panel/main.js",
     "build:notes": "esbuild panel/notes.ts --bundle --minify --format=iife --platform=browser --target=es2020 --outfile=panel/notes.js",
     "typecheck": "tsc --noEmit",
     "check": "node scripts/check-manifest.mjs",

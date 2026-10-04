@@ -13,17 +13,8 @@ import {
   mountSpinner,
 } from "@openchamber/sdk/ui";
 import { marked } from "marked";
-import { EditorState } from "@codemirror/state";
-import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import {
-  defaultHighlightStyle,
-  defineLanguageFacet,
-  Language,
-  LanguageSupport,
-  syntaxHighlighting,
-} from "@codemirror/language";
-import { GFM, parser as markdownParser } from "@lezer/markdown";
+import { EditorView } from "@codemirror/view";
+import { makeEditor } from "./editor.ts";
 import {
   fetchAssignedTasks,
   sprintLabel,
@@ -253,66 +244,13 @@ root.addEventListener("click", (event) => {
   }
 });
 
-// --- Editor -----------------------------------------------------------------
-
-const editorTheme = () =>
-  EditorView.theme(
-    {
-      "&": { color: "var(--oc-fg, inherit)", backgroundColor: "transparent", fontSize: "13px" },
-      ".cm-content": { fontFamily: "var(--oc-mono, monospace)", padding: "8px 0" },
-      ".cm-line": { padding: "0 10px" },
-      "&.cm-focused": { outline: "none" },
-      ".cm-gutters": {
-        backgroundColor: "transparent",
-        color: "var(--oc-muted, inherit)",
-        border: "none",
-      },
-      ".cm-activeLine": { backgroundColor: "var(--oc-hover, transparent)" },
-      ".cm-activeLineGutter": { backgroundColor: "var(--oc-hover, transparent)" },
-      ".cm-cursor": { borderLeftColor: "var(--oc-fg, inherit)" },
-      ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": {
-        backgroundColor: "var(--oc-selection, rgba(127,127,127,0.3))",
-      },
-    },
-    { dark: document.documentElement.dataset.ocTheme === "dark" },
-  );
-
-// Bare markdown parser: @codemirror/lang-markdown would also bundle the HTML,
-// CSS and JS grammars for embedded blocks (~1 MB); notes do not need them.
-// `Language` (not `LRLanguage`) is the wrapper for non-LR parsers.
-const markdownLanguage = new LanguageSupport(
-  new Language(defineLanguageFacet(), markdownParser.configure([GFM]), [], "markdown"),
-);
-
-const makeEditor = (parent: HTMLElement, text: string, save: () => void): EditorView => {
-  const state = EditorState.create({
-    doc: text,
-    extensions: [
-      lineNumbers(),
-      history(),
-      drawSelection(),
-      highlightActiveLine(),
-      EditorView.lineWrapping,
-      markdownLanguage,
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-      keymap.of([
-        { key: "Mod-s", preventDefault: true, run: () => (save(), true) },
-        ...defaultKeymap,
-        ...historyKeymap,
-      ]),
-      editorTheme(),
-    ],
-  });
-  return new EditorView({ state, parent });
-};
+// --- Helpers ----------------------------------------------------------------
 
 const destroyEditor = (): void => {
   editorView?.destroy();
   editorView = null;
   editorTaskId = null;
 };
-
-// --- Helpers ----------------------------------------------------------------
 
 const taskTitle = (taskId: string): string => tasks.get(taskId)?.name ?? taskId;
 
@@ -335,6 +273,7 @@ const matchesQuery = (taskId: string): boolean => {
 // --- Tabs -------------------------------------------------------------------
 
 const openNote = (taskId: string): void => {
+  if (!notes[taskId]) return;
   if (!openIds.includes(taskId)) openIds.push(taskId);
   activeId = taskId;
   if (!notes[taskId] && modes[taskId] === undefined) modes[taskId] = "edit";
@@ -548,7 +487,7 @@ const renderViewer = (): void => {
   right.hidden = false;
   paintToggles();
 
-  if (!activeId) {
+  if (!activeId || !notes[activeId]) {
     const empty = el("div", "viewer-empty");
     empty.textContent = openIds.length > 0 ? "Select a note" : "No notes open";
     viewerBody.append(empty);
@@ -563,9 +502,9 @@ const renderViewer = (): void => {
   viewerTitle.append(link);
   viewerMeta.textContent = metaFor(taskId);
 
-  const mode = modes[taskId] ?? (notes[taskId] ? "view" : "edit");
+  const mode = modes[taskId] ?? "view";
   paintViewerActions(taskId, mode);
-  if (mode === "view" && notes[taskId]) {
+  if (mode === "view") {
     const rendered = el("div", "md");
     renderMarkdown(rendered, notes[taskId]);
     viewerBody.append(rendered);
@@ -643,46 +582,18 @@ const initShellControls = (): void => {
 
 // --- Load + poll -------------------------------------------------------------
 
-const reconcile = (keepId?: string | null): void => {
+const reconcile = (): void => {
   ids = Object.keys(notes).sort(
     (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
   );
-  openIds = openIds.filter(
-    (id) => notes[id] || drafts[id] !== undefined || (keepId != null && id === keepId),
-  );
-  if (activeId && !openIds.includes(activeId)) {
+  openIds = openIds.filter((id) => notes[id] || drafts[id] !== undefined);
+  if (activeId && (!notes[activeId] || !openIds.includes(activeId))) {
     activeId = openIds.length > 0 ? openIds[openIds.length - 1] : null;
   }
   if (!activeId && openIds.length === 0 && ids.length > 0) {
     openIds = [ids[0]];
     activeId = ids[0];
   }
-};
-
-/** Consume the rail panel's handoff (`open-note`): open that tab, then clear it. */
-const takeOpenRequest = async (): Promise<string | null> => {
-  try {
-    const value = await host.storage.get("open-note");
-    if (typeof value !== "string" || !value) return null;
-    try {
-      await host.storage.delete("open-note");
-    } catch {
-      // The request is still consumed; a stale key just reopens once more.
-    }
-    return value;
-  } catch {
-    return null;
-  }
-};
-
-const applyOpenRequest = async (): Promise<string | null> => {
-  const requested = await takeOpenRequest();
-  if (!requested) return null;
-  if (!openIds.includes(requested)) openIds.push(requested);
-  activeId = requested;
-  if (!notes[requested] && modes[requested] === undefined) modes[requested] = "edit";
-  await saveUI();
-  return requested;
 };
 
 const renderAll = (): void => {
@@ -724,7 +635,7 @@ const loadAll = async (initial: boolean): Promise<void> => {
     tasks = freshTasks;
     lastUpdated = await readUpdated();
     if (initial) await loadUI();
-    reconcile(await applyOpenRequest());
+    reconcile();
     if (initial) {
       restoreBody();
       initShellControls();
@@ -754,7 +665,7 @@ const pollLocal = async (): Promise<void> => {
     const [freshNotes, freshLastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
     notes = freshNotes;
     lastNoteAt = freshLastNoteAt;
-    reconcile(await applyOpenRequest());
+    reconcile();
     renderAll();
   } catch {
     // Next poll retries.

@@ -9,6 +9,7 @@ import type { AttachIssueRequest, GuestConnection, GuestSettings } from "@opench
 import {
   applyHostReady,
   mountBanner,
+  mountButton,
   mountCheckbox,
   mountEmpty,
   mountSearchField,
@@ -16,6 +17,8 @@ import {
   mountTabs,
 } from "@openchamber/sdk/ui";
 import type { TabsHandle, Tone } from "@openchamber/sdk/ui";
+import type { EditorView } from "@codemirror/view";
+import { makeEditor } from "./editor.ts";
 import {
   buildGroups,
   buildTree,
@@ -471,6 +474,7 @@ const pollLocal = async (): Promise<void> => {
   resetLocal();
   await readDone();
   await readNotes();
+  if (editingNoteId) return;
   if (state.connected && state.status.kind === "idle") {
     const top = content.scrollTop;
     renderContent();
@@ -518,36 +522,115 @@ const attachTask = (task: ClickUpTask): void => {
 
 const NOTE_ICON =
   '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
+const BACK_ICON = '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>';
 
 const noteButtonByTask = new Map<string, HTMLButtonElement>();
 
-const syncNoteButton = (taskId: string): void => {
-  const button = noteButtonByTask.get(taskId);
-  if (button) button.dataset.has = notes[taskId] ? "true" : "false";
+// Full-panel note editor: the note icon swaps the whole panel for a markdown
+// editor instead of expanding anything under the row.
+let editingNoteId: string | null = null;
+let panelEditorView: EditorView | null = null;
+
+const destroyPanelEditor = (): void => {
+  panelEditorView?.destroy();
+  panelEditorView = null;
 };
 
-/** The rail panel has no API to open its own Notes page, so the note button
- * leaves a handoff (`open-note`) the Notes page consumes, then points there. */
-const openInNotesPage = (task: ClickUpTask): void => {
-  void (async () => {
-    try {
-      await host.storage.set("open-note", task.id);
-      await touchUpdated();
-    } catch {
-      // The toast still points the way; the page just won't preselect the note.
-    }
-    await host.toast({
-      kind: "info",
-      message: `Note for ${shortId(task)} lives in ClickUp Notes — open it from Extension pages.`,
-    });
-  })();
+const persistPanelNote = async (taskId: string, text: string): Promise<void> => {
+  const trimmed = text.trim();
+  if (trimmed) await host.storage.set(`note:${taskId}`, trimmed);
+  else await host.storage.delete(`note:${taskId}`);
+  if (trimmed) notes[taskId] = trimmed;
+  else delete notes[taskId];
+  await recordEvent(trimmed ? "note-set" : "note-delete", taskId);
 };
 
 const makeNoteButton = (task: ClickUpTask): HTMLButtonElement => {
-  const button = createIconButton("Open note in ClickUp Notes", NOTE_ICON, () => openInNotesPage(task));
+  const button = createIconButton("Edit note", NOTE_ICON, () => {
+    editingNoteId = task.id;
+    content.scrollTop = 0;
+    renderContent();
+  });
   button.dataset.has = notes[task.id] ? "true" : "false";
   noteButtonByTask.set(task.id, button);
   return button;
+};
+
+const renderNoteView = (task: ClickUpTask): void => {
+  const head = el("div", "cu-noteview-head");
+  const back = createIconButton("Back to tasks", BACK_ICON, () => {
+    editingNoteId = null;
+    destroyPanelEditor();
+    renderContent();
+  });
+  const titleWrap = el("div", "cu-noteview-titlewrap");
+  const titleEl = el("div", "cu-noteview-title");
+  titleEl.textContent = task.name || shortId(task);
+  const meta = el("div", "cu-noteview-meta");
+  meta.textContent = [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
+    .filter(Boolean)
+    .join(" · ");
+  titleWrap.append(titleEl, meta);
+  head.append(back, titleWrap);
+  content.append(head);
+
+  const editorHost = el("div", "editor");
+  content.append(editorHost);
+
+  const actions = el("div", "cu-noteview-actions");
+  content.append(actions);
+
+  const close = (): void => {
+    editingNoteId = null;
+    destroyPanelEditor();
+    renderContent();
+  };
+  const save = async (): Promise<void> => {
+    const value = panelEditorView?.state.doc.toString() ?? "";
+    try {
+      await persistPanelNote(task.id, value);
+    } catch (error) {
+      await host.toast({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+    close();
+  };
+  active.push(
+    mountButton(actions, { label: "Save", size: "xs", onClick: () => void save() }),
+    mountButton(actions, {
+      label: "Cancel",
+      variant: "ghost",
+      size: "xs",
+      onClick: close,
+    }),
+  );
+  if (notes[task.id]) {
+    active.push(
+      mountButton(actions, {
+        label: "Delete",
+        variant: "destructive",
+        size: "xs",
+        onClick: async () => {
+          try {
+            await persistPanelNote(task.id, "");
+          } catch (error) {
+            await host.toast({
+              kind: "error",
+              message: error instanceof Error ? error.message : String(error),
+            });
+            return;
+          }
+          close();
+        },
+      }),
+    );
+  }
+  const view = makeEditor(editorHost, notes[task.id] ?? "", () => void save());
+  panelEditorView = view;
+  view.focus();
 };
 
 const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
@@ -659,7 +742,16 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
 // --- Rendering --------------------------------------------------------------
 
 const renderContent = () => {
+  destroyPanelEditor();
   clearContent();
+  if (editingNoteId) {
+    const task = state.tasks.find((entry) => entry.id === editingNoteId);
+    if (task) {
+      renderNoteView(task);
+      return;
+    }
+    editingNoteId = null;
+  }
   frenteRow.hidden = true;
   if (!state.connected) {
     active.push(

@@ -31,13 +31,12 @@ install prompt has nothing to approve.
   and **does not change anything in ClickUp**. Checked rows get a struck-through
   title. Ticks are per calendar day in your local time; the last 60 days are
   kept, so a new day starts unticked.
-- A **local note** on each task: click the note icon on a row and the note opens
-  as a tab in the **ClickUp Notes** page (main area → Extension pages). Notes
-  live in the extension's own storage (key `note:<taskId>`) and are **never sent
-  to ClickUp**, so pasted AI text stays out of your workspace. A saved note is
-  not shown in the list — the row's note icon turns **solid** so you can tell one
-  exists. (The rail panel cannot open the Notes page itself — no guest API for
-  it — so the icon leaves the note ready in that tab and points you there.)
+- A **local note** on each task: click the note icon on a row and the whole panel
+  swaps to a markdown editor for that note, with a back button to the task list.
+  Notes live in the extension's own storage (key `note:<taskId>`) and are **never
+  sent to ClickUp**, so pasted AI text stays out of your workspace. A saved note
+  is not shown in the list — the row's note icon turns **solid** so you can tell
+  one exists.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible
@@ -203,13 +202,15 @@ without re-pasting. Prefer local notes/ticks so AI text never lands in ClickUp.
 `skills/clickup-tasks/SKILL.md` documents this contract for agent sessions; it is
 symlinked into `~/.config/opencode/skills/clickup-tasks`.
 
-### Notes are markdown, and editable in the notes tab
+### Notes are markdown, editable in the panel and the notes tab
 
-Notes are plain-text markdown. The **ClickUp Notes** page (Extension pages menu)
-renders them — headings, lists, code, quotes, links, tables — and edits them in
-place with CodeMirror: markdown highlighting, line numbers, undo/redo, and
-`Ctrl/Cmd+S` to save. Saving writes back to extension storage and appends a
-`note-set` event. No extra permission is needed.
+Notes are plain-text markdown. Clicking a task's note icon swaps the whole rail
+panel for a CodeMirror markdown editor for that note — highlighting, line
+numbers, undo/redo, `Ctrl/Cmd+S` to save — with Save/Cancel/Delete and a back
+button to the task list. Nothing expands under the row. The **ClickUp Notes**
+page (Extension pages menu) renders all notes and edits them the same way.
+Saving writes back to extension storage and appends a `note-set` event. No extra
+permission is needed.
 
 The editor bundles CodeMirror (`@codemirror/state|view|commands|language` plus
 `@lezer/markdown`; minified ~400 KB, loaded only on this page). It uses the bare
