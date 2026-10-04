@@ -89,7 +89,7 @@ first use.
 
 Each task's note is a plain markdown file, `<taskId>.md`, in the notes folder —
 open it in Obsidian, edit it there, and the panel picks it up on its next
-refresh. The file starts with a header (task title, link, sprint, status, list)
+refresh. The file starts with an `id - title` header (task id and name, link, sprint, status, list)
 followed by your text; agent-written notes keep the same shape.
 
 - **Click the note icon** on a row: the file is created from a template when
@@ -228,7 +228,7 @@ symlinked into `~/.config/opencode/skills/clickup-tasks`.
 
 There is deliberately no editor in the extension anymore: no CodeMirror, no
 markdown renderer, no notes tab. A note is `<taskId>.md` in the notes folder,
-with a header (title, link, sprint, status, list) and your markdown below it.
+with an `id - title` header (task id and name, link, sprint, status, list) and your markdown below it.
 The panel only ensures the file exists and shows whether it does; Obsidian does
 the editing. The extension requests exactly one outside-project grant for this:
 `filesystem: ["~/Documents/obsidian/ClickUp/**"]`.

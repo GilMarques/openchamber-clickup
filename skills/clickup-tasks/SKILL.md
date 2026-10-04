@@ -45,15 +45,15 @@ node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
 ## Storage contract
 
 ```
-~/Documents/obsidian/ClickUp/<taskId>.md   (notes; header + markdown body)
+~/Documents/obsidian/ClickUp/<taskId>.md   (notes; `id - title` header + markdown body)
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
   "events": [ { "at": "2026-10-04T21:44:03.604Z", "type": "done-add", "taskId": "…", "date": "2026-10-04" } ],
   "updated": "<epoch ms>" }
 ```
 
-- One markdown file per task: a header (`# title`, link + sprint/status/list)
-  then `---`, then the body. `note_get`/`notes_list` return the body only.
+- One markdown file per task: an `id - title` header (`# 869epr6z9 - Improve
+  dialog`), link + sprint/status/list line, then `---`, then the body. `note_get`/`notes_list` return the body only.
 - `done` keeps the last 60 days, one entry per date.
 - `events` is an append-only timestamped history of every note/done change
   (`done-add`, `done-remove`, `note-set`, `note-delete`), newest last, capped at
