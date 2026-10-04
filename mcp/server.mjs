@@ -154,12 +154,12 @@ const compact = (task) => ({
 const writeNoteBody = (task, text) => {
   ensureNotesDir();
   const trimmed = String(text ?? "").trim();
-  const meta = [task.customId ?? task.id, task.sprint, task.status, task.list]
-    .filter(Boolean)
-    .join(" · ");
+  const label = task.customId ?? task.id;
+  const title = task.name ? `${label} - ${task.name}` : label;
+  const meta = [task.sprint, task.status, task.list].filter(Boolean).join(" · ");
   const header =
-    `# ${task.name || task.customId || task.id}\n\n` +
-    `[${task.customId || task.id}](${task.url ?? `https://app.clickup.com/t/${task.id}`})` +
+    `# ${title}\n\n` +
+    `[${label}](${task.url ?? `https://app.clickup.com/t/${task.id}`})` +
     `${meta ? ` · ${meta}` : ""}`;
   writeFileSync(noteFile(task.id), `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
   return trimmed;

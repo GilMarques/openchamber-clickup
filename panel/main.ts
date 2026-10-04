@@ -420,10 +420,12 @@ const readNoteFiles = async (): Promise<void> => {
 
 const noteTemplate = (task: ClickUpTask, body: string): string => {
   const url = task.url || `${DEFAULT_ORIGIN}/t/${task.id}`;
-  const meta = [task.custom_id || task.id, sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
+  const label = task.custom_id || task.id;
+  const title = task.name ? `${label} - ${task.name}` : label;
+  const meta = [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
     .filter(Boolean)
     .join(" · ");
-  return `# ${task.name || task.custom_id || task.id}\n\n[${task.custom_id || task.id}](${url})${meta ? ` · ${meta}` : ""}\n\n---\n\n${body}`;
+  return `# ${title}\n\n[${label}](${url})${meta ? ` · ${meta}` : ""}\n\n---\n\n${body}`;
 };
 
 /** One-time move of pre-file notes (`note:<id>` storage keys) into the vault. */
