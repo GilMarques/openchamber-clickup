@@ -520,6 +520,7 @@ const makeNoteButton = (onNote: () => void): HTMLButtonElement => {
 };
 
 const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
+  row.classList.toggle("cu-done", doneToday.has(task.id));
   const wrap = el("span", "cu-check");
   wrap.addEventListener("click", (event) => event.stopPropagation());
   wrap.addEventListener("keydown", (event) => event.stopPropagation());

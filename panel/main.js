@@ -2273,6 +2273,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     return button2;
   };
   var makeDoneCheckbox = (task, row) => {
+    row.classList.toggle("cu-done", doneToday.has(task.id));
     const wrap = el2("span", "cu-check");
     wrap.addEventListener("click", (event) => event.stopPropagation());
     wrap.addEventListener("keydown", (event) => event.stopPropagation());
