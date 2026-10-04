@@ -314,19 +314,16 @@ const statusTone = (status: string, type: string | undefined): Tone => {
   return "neutral";
 };
 
-const makeStatusBadge = (task: ClickUpTask): HTMLElement | null => {
+const makeStatusDot = (task: ClickUpTask): HTMLElement | null => {
   const status = task.status?.status;
   if (!status) return null;
-  const badge = el("span", "cu-badge cu-status");
-  badge.textContent = status;
+  const dot = el("span", "cu-dot");
+  dot.setAttribute("role", "img");
+  dot.setAttribute("aria-label", status);
   const color = task.status?.color;
-  if (color) {
-    badge.style.color = color;
-    badge.style.background = `color-mix(in srgb, ${color} 18%, transparent)`;
-  } else {
-    badge.dataset.tone = statusTone(status, task.status?.type);
-  }
-  return badge;
+  if (color) dot.style.background = color;
+  else dot.dataset.tone = statusTone(status, task.status?.type);
+  return dot;
 };
 
 const attachTask = (task: ClickUpTask): void => {
@@ -356,8 +353,6 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
     main.append(subEl);
   }
   row.append(main);
-  const statusBadge = makeStatusBadge(task);
-  if (statusBadge) row.append(statusBadge);
   const priority = task.priority?.priority;
   if (priority) {
     const badge = el("span", "cu-badge");
@@ -365,6 +360,8 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
     badge.dataset.tone = priorityTone(priority);
     row.append(badge);
   }
+  const statusDot = makeStatusDot(task);
+  if (statusDot) row.append(statusDot);
   const due = formatDue(task);
   if (due) {
     const metaEl = el("span", "cu-meta");

@@ -25,10 +25,10 @@ install prompt has nothing to approve.
 - A **Frentes filter row** under the Open/All tabs: `All` plus one tab per
   frente (with task counts). Pick a frente to show only its tasks; the tabs
   update with the Open/All and search filters.
-- The **workflow status** (for example `peer qa (stage)`, `sprint commitment`,
-  `in progress`) as a coloured badge, using the status's own ClickUp colour.
-  The **sprint** is the row's sub-label, and the priority badge and due date stay
-  on the right.
+- The **sprint** is the row's sub-label, and the **priority** badge follows it.
+  The **workflow status** is a small dot in the status's own ClickUp colour — no
+  text (the status name is the dot's accessible label). The due date stays on the
+  right.
 - **Open / All** tabs and a **filter** box.
 - A rail **badge** with your open-task count (clears when you open the panel).
 - Click a task to **attach it to the chat** as a chip, with status, list, due

@@ -187,10 +187,24 @@
         color: var(--oc-primary-text, var(--oc-primary));
         background: color-mix(in srgb, var(--oc-primary) 15%, transparent);
       }
-      .cu-status {
-        max-width: 150px;
-        overflow: hidden;
-        text-overflow: ellipsis;
+      .cu-dot {
+        flex: 0 0 auto;
+        width: 10px;
+        height: 10px;
+        border-radius: 9999px;
+        background: var(--oc-muted, currentColor);
+      }
+      .cu-dot[data-tone="error"] {
+        background: var(--oc-error, currentColor);
+      }
+      .cu-dot[data-tone="warning"] {
+        background: var(--oc-warning, currentColor);
+      }
+      .cu-dot[data-tone="info"] {
+        background: var(--oc-info, currentColor);
+      }
+      .cu-dot[data-tone="success"] {
+        background: var(--oc-success, currentColor);
       }
     </style>
   </head>

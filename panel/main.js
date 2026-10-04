@@ -2003,19 +2003,16 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     if (type === "closed" || type === "done") return "success";
     return "neutral";
   };
-  var makeStatusBadge = (task) => {
+  var makeStatusDot = (task) => {
     const status = task.status?.status;
     if (!status) return null;
-    const badge = el2("span", "cu-badge cu-status");
-    badge.textContent = status;
+    const dot = el2("span", "cu-dot");
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", status);
     const color = task.status?.color;
-    if (color) {
-      badge.style.color = color;
-      badge.style.background = `color-mix(in srgb, ${color} 18%, transparent)`;
-    } else {
-      badge.dataset.tone = statusTone(status, task.status?.type);
-    }
-    return badge;
+    if (color) dot.style.background = color;
+    else dot.dataset.tone = statusTone(status, task.status?.type);
+    return dot;
   };
   var attachTask = (task) => {
     void host.attach(attachPayload(task)).then(() => host.toast({ kind: "success", message: `Attached ${shortId(task)} to the chat.` })).catch(
@@ -2040,8 +2037,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       main.append(subEl);
     }
     row.append(main);
-    const statusBadge = makeStatusBadge(task);
-    if (statusBadge) row.append(statusBadge);
     const priority = task.priority?.priority;
     if (priority) {
       const badge = el2("span", "cu-badge");
@@ -2049,6 +2044,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       badge.dataset.tone = priorityTone(priority);
       row.append(badge);
     }
+    const statusDot = makeStatusDot(task);
+    if (statusDot) row.append(statusDot);
     const due = formatDue(task);
     if (due) {
       const metaEl = el2("span", "cu-meta");
