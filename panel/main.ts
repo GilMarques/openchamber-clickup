@@ -500,24 +500,24 @@ const openInObsidian = (task: ClickUpTask): void => {
       });
       return;
     }
-    if (answer.status !== 200) {
-      await host.toast({
-        kind: "error",
-        message: `Obsidian launcher answered ${answer.status}. Note file: ${path}`,
-        copy: { text: path },
-      });
-      return;
-    }
-    let opened = false;
+    let failure: string | null = null;
+    let parsed: { ok?: boolean; error?: string } | null = null;
     try {
-      opened = Boolean((JSON.parse(answer.body) as { ok?: boolean }).ok);
+      parsed = JSON.parse(answer.body) as { ok?: boolean; error?: string };
     } catch {
-      opened = false;
+      parsed = null;
     }
-    if (!opened) {
+    if (answer.status !== 200) {
+      failure = parsed?.error
+        ? `Obsidian launcher failed: ${parsed.error}`
+        : `Obsidian launcher answered ${answer.status}.`;
+    } else if (!parsed?.ok) {
+      failure = parsed?.error ? `Obsidian did not open: ${parsed.error}` : "Obsidian did not open.";
+    }
+    if (failure) {
       await host.toast({
         kind: "error",
-        message: `Obsidian did not open. Note file: ${path}`,
+        message: `${failure} Note file: ${path}`,
         copy: { text: path },
       });
       return;

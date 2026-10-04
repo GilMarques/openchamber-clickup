@@ -15,6 +15,7 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
@@ -50,18 +51,64 @@ const readBody = (req) =>
 
 const launch = (uri) =>
   new Promise((resolve) => {
-    const child = spawn("xdg-open", [uri], { stdio: "ignore" });
+    // The host starts services with a sanitized environment (PATH, HOME, temp,
+    // locale only), which cannot reach the graphical session on its own.
+    // Rebuild the missing session pieces from their well-known per-user paths
+    // so xdg-open can find its handlers and talk to the desktop. In particular
+    // xdg-open needs XDG_DATA_DIRS to include the flatpak export dirs, or it
+    // never finds the obsidian:// handler. Never overrides what is set.
+    const withSession = () => {
+      const env = { ...process.env };
+      const home = os.homedir();
+      if (!env.XDG_DATA_HOME) env.XDG_DATA_HOME = `${home}/.local/share`;
+      if (!env.XDG_CONFIG_HOME) env.XDG_CONFIG_HOME = `${home}/.config`;
+      if (!env.XDG_DATA_DIRS) {
+        env.XDG_DATA_DIRS = [
+          `${home}/.local/share/flatpak/exports/share`,
+          "/var/lib/flatpak/exports/share",
+          "/usr/local/share",
+          "/usr/share",
+        ].join(":");
+      }
+      let uid = null;
+      try {
+        uid = os.userInfo().uid;
+      } catch {
+        uid = null;
+      }
+      if (typeof uid === "number") {
+        const runtimeDir = `/run/user/${uid}`;
+        if (!env.XDG_RUNTIME_DIR && fs.existsSync(runtimeDir)) env.XDG_RUNTIME_DIR = runtimeDir;
+        const bus = `${runtimeDir}/bus`;
+        if (!env.DBUS_SESSION_BUS_ADDRESS && fs.existsSync(bus)) {
+          env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${bus}`;
+        }
+        if (!env.WAYLAND_DISPLAY && fs.existsSync(`${runtimeDir}/wayland-0`)) {
+          env.WAYLAND_DISPLAY = "wayland-0";
+        }
+      }
+      if (!env.DISPLAY && fs.existsSync("/tmp/.X11-unix/X0")) env.DISPLAY = ":0";
+      return env;
+    };
+    const child = spawn("xdg-open", [uri], { stdio: "ignore", env: withSession() });
     const timer = setTimeout(() => {
       child.kill();
+      console.error(`xdg-open timed out for ${uri}`);
       resolve({ ok: false, error: "xdg-open timed out" });
     }, 10000);
     child.on("error", (error) => {
       clearTimeout(timer);
+      console.error(`could not launch ${uri}: ${error.message}`);
       resolve({ ok: false, error: `could not launch Obsidian: ${error.message}` });
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve(code === 0 ? { ok: true } : { ok: false, error: `xdg-open exited with status ${code}` });
+      if (code === 0) {
+        resolve({ ok: true });
+        return;
+      }
+      console.error(`xdg-open exited with status ${code} for ${uri}`);
+      resolve({ ok: false, error: `xdg-open exited with status ${code}` });
     });
   });
 
