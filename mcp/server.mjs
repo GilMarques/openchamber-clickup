@@ -1,23 +1,64 @@
 #!/usr/bin/env node
 // MCP server for the ClickUp Tasks OpenChamber extension.
 //
-// Gives an agent typed tools to manipulate the extension's local state (notes,
-// done ticks) and to read ClickUp itself. Local state is the same guest-storage
-// file the panel uses, so changes show after the panel refreshes (or within its
-// live poll).
+// Gives an agent typed tools to manipulate the extension's local state and to
+// read ClickUp itself. Notes live as markdown files inside the user's Obsidian
+// vault (one per task), so the agent and Obsidian share the same files; done
+// ticks and the event log stay in the extension's guest storage, which the
+// panel polls.
 //
 // Transport: newline-delimited JSON-RPC 2.0 over stdio (MCP stdio).
 // Configure as a local MCP server, e.g. in opencode.json:
 //   "mcp": { "clickup": { "type": "local", "command": ["node", "…/mcp/server.mjs"], "enabled": true } }
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 
 const STORAGE =
   process.env.OPENCHAMBER_GUEST_STORAGE ??
   join(homedir(), ".config", "openchamber", "guest-storage", "clickup-tasks.json");
 const AUTH = join(homedir(), ".config", "openchamber", "guest-auth.json");
+
+const DEFAULT_NOTES_DIR = join(homedir(), "Documents", "obsidian", "ClickUp");
+const notesDir = () =>
+  process.env.CLICKUP_NOTES_DIR ? process.env.CLICKUP_NOTES_DIR.trim() : DEFAULT_NOTES_DIR;
+
+/** Task ids are ClickUp identifiers; anything else is rejected, never used as a path. */
+const safeId = (value) => {
+  const id = String(value ?? "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Bad task id: ${JSON.stringify(id)}`);
+  return id;
+};
+
+const noteFile = (taskId) => join(notesDir(), `${safeId(taskId)}.md`);
+
+const ensureNotesDir = () => mkdirSync(notesDir(), { recursive: true });
+
+const HEADER_SEP = "\n---\n\n";
+
+/** Split a note file into its template header and the editable body. */
+const splitBody = (content) => {
+  const at = content.indexOf(HEADER_SEP);
+  return at < 0 ? content : content.slice(at + HEADER_SEP.length);
+};
+
+const readNoteBody = (taskId) => {
+  try {
+    return splitBody(readFileSync(noteFile(taskId), "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+};
 
 const readState = () => {
   try {
@@ -110,6 +151,51 @@ const compact = (task) => ({
   url: task.url ?? null,
 });
 
+const writeNoteBody = (task, text) => {
+  ensureNotesDir();
+  const trimmed = String(text ?? "").trim();
+  const meta = [task.customId ?? task.id, task.sprint, task.status, task.list]
+    .filter(Boolean)
+    .join(" · ");
+  const header =
+    `# ${task.name || task.customId || task.id}\n\n` +
+    `[${task.customId || task.id}](${task.url ?? `https://app.clickup.com/t/${task.id}`})` +
+    `${meta ? ` · ${meta}` : ""}`;
+  writeFileSync(noteFile(task.id), `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
+  return trimmed;
+};
+
+/** Best-effort task lookup for note headers; falls back to the bare id. */
+const describeTask = async (taskId) => {
+  try {
+    const isCustom = /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(taskId);
+    const { teamIds } = await findUserAndTeams();
+    const attempts = isCustom
+      ? teamIds.map((teamId) => ({ custom_task_ids: "true", team_id: teamId }))
+      : [{}];
+    for (const query of attempts) {
+      try {
+        return compact(await api(`/api/v2/task/${encodeURIComponent(taskId)}`, query));
+      } catch {
+        // Try the next workspace, then give up.
+      }
+    }
+  } catch {
+    // Header falls back to the id below.
+  }
+  return { id: taskId, customId: null, name: "", status: null, sprint: null, list: null, url: null };
+};
+
+/** Launch Obsidian on a note file through the OS-registered URI handler. */
+const openInObsidian = (taskId) =>
+  new Promise((resolve, reject) => {
+    const uri = `obsidian://open?path=${encodeURIComponent(noteFile(taskId))}`;
+    const child = spawn("xdg-open", [uri], { detached: true, stdio: "ignore" });
+    child.on("error", reject);
+    child.unref();
+    resolve(uri);
+  });
+
 const findUserAndTeams = async () => {
   const me = await api("/api/v2/user");
   const teams = await api("/api/v2/team");
@@ -144,12 +230,13 @@ const tools = [
   },
   {
     name: "notes_list",
-    description: "List the extension's local notes (task id -> text). Notes never leave OpenChamber.",
+    description:
+      "List local notes (one markdown file per task in the Obsidian vault). Returns task id and body text.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "note_get",
-    description: "Read the local note for one task.",
+    description: "Read the local note body for one task (without the file header).",
     inputSchema: {
       type: "object",
       properties: { taskId: { type: "string" } },
@@ -159,7 +246,7 @@ const tools = [
   {
     name: "note_set",
     description:
-      "Create or replace the local note for a task. Stored in OpenChamber only; not sent to ClickUp.",
+      "Create or replace the local note body for a task. Written to the Obsidian vault file; never sent to ClickUp.",
     inputSchema: {
       type: "object",
       properties: { taskId: { type: "string" }, text: { type: "string" } },
@@ -168,7 +255,17 @@ const tools = [
   },
   {
     name: "note_delete",
-    description: "Delete the local note for a task.",
+    description: "Delete the local note file for a task.",
+    inputSchema: {
+      type: "object",
+      properties: { taskId: { type: "string" } },
+      required: ["taskId"],
+    },
+  },
+  {
+    name: "note_open",
+    description:
+      "Open the task's note in Obsidian (creates the vault file first when missing).",
     inputSchema: {
       type: "object",
       properties: { taskId: { type: "string" } },
@@ -251,37 +348,48 @@ const callTool = async (name, args = {}) => {
       throw lastError ?? new Error(`Task ${id} not found`);
     }
     case "notes_list": {
-      const data = readState();
+      ensureNotesDir();
+      const files = readdirSync(notesDir()).filter((name) => name.endsWith(".md"));
       return {
-        notes: Object.entries(data)
-          .filter(([key]) => key.startsWith("note:"))
-          .map(([key, value]) => ({ taskId: key.slice("note:".length), text: String(value) })),
+        notes: files.map((name) => {
+          const taskId = basename(name, ".md");
+          return { taskId, text: readNoteBody(taskId) ?? "" };
+        }),
       };
     }
     case "note_get": {
-      const data = readState();
-      return { taskId: String(args.taskId ?? ""), text: data[`note:${args.taskId}`] ?? null };
+      const taskId = safeId(args.taskId);
+      return { taskId, text: readNoteBody(taskId) };
     }
     case "note_set": {
-      const taskId = String(args.taskId ?? "").trim();
-      const text = String(args.text ?? "").trim();
-      if (!taskId || !text) throw new Error("taskId and text are required");
+      const taskId = safeId(args.taskId);
+      const raw = String(args.text ?? "").trim();
+      if (!raw) throw new Error("text is required");
+      const text = writeNoteBody(await describeTask(taskId), raw);
       const data = readState();
-      data[`note:${taskId}`] = text;
       pushEvent(data, "note-set", taskId);
       touch(data);
       writeState(data);
-      return { taskId, text, saved: true };
+      return { taskId, text, path: noteFile(taskId), saved: true };
     }
     case "note_delete": {
-      const taskId = String(args.taskId ?? "").trim();
-      if (!taskId) throw new Error("taskId is required");
+      const taskId = safeId(args.taskId);
+      try {
+        unlinkSync(noteFile(taskId));
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
       const data = readState();
-      delete data[`note:${taskId}`];
       pushEvent(data, "note-delete", taskId);
       touch(data);
       writeState(data);
       return { taskId, deleted: true };
+    }
+    case "note_open": {
+      const taskId = safeId(args.taskId);
+      if (readNoteBody(taskId) === null) writeNoteBody(await describeTask(taskId), "");
+      const uri = await openInObsidian(taskId);
+      return { taskId, path: noteFile(taskId), uri, opened: true };
     }
     case "done_list": {
       const data = readState();

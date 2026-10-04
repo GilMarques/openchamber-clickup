@@ -1,31 +1,88 @@
 #!/usr/bin/env node
-// Read/write the ClickUp Tasks extension's local state (notes + done ticks).
+// Read/write the ClickUp Tasks extension's local state.
 //
-// The panel keeps its local state in OpenChamber's guest storage as plain JSON.
-// This script edits that same file atomically (temp file + rename, mode 600), so
-// an agent or a shell can manipulate the extension without hand-editing JSON.
+// Notes live as markdown files in the user's Obsidian vault (one per task), so
+// Obsidian and any agent share the same files. Done ticks and the event log
+// stay in OpenChamber's guest storage as plain JSON, which the panel polls.
 //
-// File: ~/.config/openchamber/guest-storage/clickup-tasks.json
+// Notes dir: $CLICKUP_NOTES_DIR or ~/Documents/obsidian/ClickUp
+// Storage:   ~/.config/openchamber/guest-storage/clickup-tasks.json
 // Shape: { "done": { "YYYY-MM-DD": ["<taskId>", ...] },
-//          "note:<taskId>": "text", ... }
-//
-// After a change, press Refresh in the panel (or reopen it) to see it.
+//          "events": [ { "at", "type", "taskId", "date?" } ],
+//          "updated": "<epoch ms>" }
 //
 // Usage:
 //   node scripts/state.mjs list
 //   node scripts/state.mjs notes
 //   node scripts/state.mjs note-set <taskId> <text...>
 //   node scripts/state.mjs note-del <taskId>
+//   node scripts/state.mjs note-open <taskId>
 //   node scripts/state.mjs done-list [YYYY-MM-DD]
 //   node scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
 //   node scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+//   node scripts/state.mjs events [taskId]
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const file =
   process.env.OPENCHAMBER_GUEST_STORAGE ??
   join(homedir(), ".config", "openchamber", "guest-storage", "clickup-tasks.json");
+
+const NOTES_DIR = (process.env.CLICKUP_NOTES_DIR ?? "").trim()
+  || join(homedir(), "Documents", "obsidian", "ClickUp");
+
+const safeId = (value) => {
+  const id = String(value ?? "").trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+    console.error(`Bad task id: ${JSON.stringify(id)}`);
+    process.exit(2);
+  }
+  return id;
+};
+
+const noteFile = (taskId) => join(NOTES_DIR, `${safeId(taskId)}.md`);
+const HEADER_SEP = "\n---\n\n";
+
+const splitBody = (content) => {
+  const at = content.indexOf(HEADER_SEP);
+  return at < 0 ? content : content.slice(at + HEADER_SEP.length);
+};
+
+const readNoteBody = (taskId) => {
+  try {
+    return splitBody(readFileSync(noteFile(taskId), "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+};
+
+const writeNoteBody = (taskId, header, text) => {
+  mkdirSync(NOTES_DIR, { recursive: true });
+  const trimmed = String(text ?? "").trim();
+  writeFileSync(noteFile(taskId), `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
+  return trimmed;
+};
+
+const plainHeader = (taskId) => `# ${taskId}\n\n[${taskId}](https://app.clickup.com/t/${taskId})`;
+
+const openInObsidian = (taskId) => {
+  const uri = `obsidian://open?path=${encodeURIComponent(noteFile(taskId))}`;
+  const result = spawnSync("xdg-open", [uri], { stdio: "ignore" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`xdg-open exited with status ${result.status}`);
+  return uri;
+};
 
 const read = () => {
   try {
@@ -58,7 +115,7 @@ const pushEvent = (data, type, taskId, date) => {
 
 const usage = () => {
   console.error(
-    "usage: state.mjs list | notes | note-set <id> <text...> | note-del <id> | " +
+    "usage: state.mjs list | notes | note-set <id> <text...> | note-del <id> | note-open <id> | " +
       "done-list [date] | done-add <id> [date] | done-remove <id> [date] | events [taskId]",
   );
   process.exit(2);
@@ -73,30 +130,43 @@ switch (command) {
     break;
   }
   case "notes": {
-    for (const [key, value] of Object.entries(data)) {
-      if (key.startsWith("note:")) {
-        console.log(`${key.slice("note:".length)}\t${String(value).replace(/\n/g, " ")}`);
-      }
+    if (!existsSync(NOTES_DIR)) break;
+    for (const name of readdirSync(NOTES_DIR).filter((entry) => entry.endsWith(".md"))) {
+      const taskId = basename(name, ".md");
+      const first = (readNoteBody(taskId) ?? "").split("\n")[0] ?? "";
+      console.log(`${taskId}\t${first}`);
     }
     break;
   }
   case "note-set": {
-    const [id, ...rest] = args;
+    const [rawId, ...rest] = args;
+    const id = safeId(rawId);
     const text = rest.join(" ").trim();
     if (!id || !text) usage();
-    data[`note:${id}`] = text;
+    writeNoteBody(id, plainHeader(id), text);
     pushEvent(data, "note-set", id);
     write(data);
     console.log(`note set on ${id}`);
     break;
   }
   case "note-del": {
-    const [id] = args;
+    const id = safeId(args[0]);
     if (!id) usage();
-    delete data[`note:${id}`];
+    try {
+      unlinkSync(noteFile(id));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
     pushEvent(data, "note-delete", id);
     write(data);
     console.log(`note removed from ${id}`);
+    break;
+  }
+  case "note-open": {
+    const id = safeId(args[0]);
+    if (!id) usage();
+    if (readNoteBody(id) === null) writeNoteBody(id, plainHeader(id), "");
+    console.log(openInObsidian(id));
     break;
   }
   case "done-list": {

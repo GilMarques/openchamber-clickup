@@ -5,8 +5,8 @@ see what is on your plate and drop a task into the chat without opening ClickUp.
 
 It reads your tasks from the **ClickUp Public API v2**, using a personal API
 token you paste once. The token is stored on the OpenChamber server and never
-reaches the extension page. No OpenChamber capabilities are requested, so the
-install prompt has nothing to approve.
+reaches the extension page. The only OpenChamber capability it requests is the
+`filesystem` grant for its Obsidian notes folder, approved once on install.
 
 > MCP and extensions are different things. This extension uses ClickUp's REST
 > API for the reliable, always-on table. The `tools` block in `package.json` also
@@ -31,15 +31,10 @@ install prompt has nothing to approve.
   and **does not change anything in ClickUp**. Checked rows get a struck-through
   title. Ticks are per calendar day in your local time; the last 60 days are
   kept, so a new day starts unticked.
-- A **local note** on each task: click the note icon on a row and the whole panel
-  swaps to a markdown editor for that note, with a back button to the task list.
-  Open notes also appear as a **tabs row** under the header (like the Files
-  panel's tabs): click a tab to jump to that note, × to close it. The tabs are
-  shared with the **ClickUp Notes** page, so notes opened in either surface show
-  up in both. Notes live in the extension's own storage (key `note:<taskId>`) and
-  are **never sent to ClickUp**, so pasted AI text stays out of your workspace.
-  A saved note is not shown in the list — the row's note icon turns **solid** so
-  you can tell one exists.
+- A **local note** on each task, kept as a markdown file in your Obsidian vault
+  (`~/Documents/obsidian/ClickUp/<taskId>.md`). Click the note icon and the file
+  is created if needed; the icon turns **solid** once a note exists. Notes are
+  **never sent to ClickUp**, so pasted AI text stays out of your workspace.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible
@@ -49,12 +44,6 @@ install prompt has nothing to approve.
 - Click a task to **attach it to the chat** as a chip, with status, list, due
   date, and URL as context for the agent.
 - A `/clickup ABC-12` **slash command** to attach a task by id.
-- A **ClickUp Notes** full-screen page from the Extension pages menu in the main
-  area: every local note rendered as **markdown**, newest first, with the task
-  title, sprint, status, list, and the time the note was last saved. Links open
-  in the browser; raw HTML in a note is stripped before it renders.
-- A **full-screen panel page** is the same rail panel, opened from the Extension
-  pages menu.
 
 ## Install
 
@@ -68,8 +57,9 @@ edit, rebuild, and reload.
    /home/gil/clickup-tasks
    ```
 
-3. The extension adds no permissions, so it enables immediately and its icon
-   appears on the rail.
+3. The extension asks for one permission — read/write files under
+   `~/Documents/obsidian/ClickUp/` (its `filesystem` grant) — so it enables
+   after you approve it, and its icon appears on the rail.
 
 For a Git install (which can self-update), commit `package.json`,
 `panel/index.html`, and the built `panel/main.js`, then add the repository URL.
@@ -87,6 +77,24 @@ workspace your token can see; set it to pin the table to one workspace.
 Two more optional fields tune the grouping: **Folder that holds your frentes**
 (default `Frentes`) and **Task custom field that holds the sprint** (default
 `Sprints`). Change them if you rename that folder or use a different field.
+
+The **Notes folder** field sets where note files live inside your Obsidian vault
+(default `~/Documents/obsidian/ClickUp`). It must stay under
+`~/Documents/obsidian/` to match the approved grant; the folder is created on
+first use.
+
+## Notes live in Obsidian
+
+Each task's note is a plain markdown file, `<taskId>.md`, in the notes folder —
+open it in Obsidian, edit it there, and the panel picks it up on its next
+refresh. The file starts with a header (task title, link, sprint, status, list)
+followed by your text; agent-written notes keep the same shape.
+
+- **Click the note icon** on a row: the file is created from a template when
+  missing, and a toast confirms the vault path (with a Copy button).
+- **To open it in Obsidian**, ask the agent (`note_open` tool) or run
+  `node scripts/state.mjs note-open <taskId>` — the panel itself cannot launch
+  outside apps (OpenChamber only lets extensions open `http(s)` URLs).
 
 ## Using it
 
@@ -128,15 +136,18 @@ REST API rather than MCP for its reads.
 
 ## Agent / script access
 
-The panel's local state is a plain JSON file on the OpenChamber server:
+Done ticks and the event log live in a plain JSON file on the OpenChamber server:
 
 ```
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
-  "note:<taskId>": "text",
   "events": [ { "at": "ISO", "type": "done-add", "taskId": "…", "date": "YYYY-MM-DD" } ],
   "updated": "<epoch ms>" }
 ```
+
+Notes live as files instead: `~/Documents/obsidian/ClickUp/<taskId>.md`
+(override with `$CLICKUP_NOTES_DIR` for scripts, or the extension's `notes-dir`
+setting for the panel).
 
 Every write records a timestamped event — `done-add`, `done-remove`, `note-set`,
 `note-delete` — in the `events` array (last 500 kept). Nothing renders it; it is
@@ -151,8 +162,9 @@ A local MCP server exposes the extension to an agent with typed tools:
 | --- | --- |
 | `tasks_list` | Compact assigned tasks (`includeClosed`, `limit`) |
 | `task_get` | One task by id / custom id |
-| `notes_list` / `note_get` | Read local notes |
-| `note_set` / `note_delete` | Write/remove a local note |
+| `notes_list` / `note_get` | Read note bodies from the vault |
+| `note_set` / `note_delete` | Write/remove a vault note file |
+| `note_open` | Ensure the note file, then open it in Obsidian |
 | `done_list` | Task ids ticked on a date (default today) |
 | `done_add` / `done_remove` | Tick / untick a task for a date |
 | `events_list` | Timestamped history of note and done changes |
@@ -175,14 +187,15 @@ is respawned.
 
 ### CLI
 
-`scripts/state.mjs` edits the same file safely (atomic temp-file + rename, keeps
-other keys):
+`scripts/state.mjs` works on the same files and storage (notes go to the vault,
+everything else stays atomic in JSON):
 
 ```bash
 node scripts/state.mjs list
 node scripts/state.mjs notes
 node scripts/state.mjs note-set <taskId> "some text"
 node scripts/state.mjs note-del <taskId>
+node scripts/state.mjs note-open <taskId>
 node scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
 node scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
 node scripts/state.mjs events [taskId]
@@ -205,30 +218,20 @@ without re-pasting. Prefer local notes/ticks so AI text never lands in ClickUp.
 `skills/clickup-tasks/SKILL.md` documents this contract for agent sessions; it is
 symlinked into `~/.config/opencode/skills/clickup-tasks`.
 
-### Notes are markdown, editable in the panel and the notes tab
+### Notes are vault files, edited in Obsidian
 
-Notes are plain-text markdown. Clicking a task's note icon swaps the whole rail
-panel for a CodeMirror markdown editor for that note — highlighting, line
-numbers, undo/redo, `Ctrl/Cmd+S` to save — with Save/Cancel/Delete and a back
-button to the task list. Nothing expands under the row. The **ClickUp Notes**
-page (Extension pages menu) renders all notes and edits them the same way.
-Saving writes back to extension storage and appends a `note-set` event. No extra
-permission is needed.
+There is deliberately no editor in the extension anymore: no CodeMirror, no
+markdown renderer, no notes tab. A note is `<taskId>.md` in the notes folder,
+with a header (title, link, sprint, status, list) and your markdown below it.
+The panel only ensures the file exists and shows whether it does; Obsidian does
+the editing. The extension requests exactly one outside-project grant for this:
+`filesystem: ["~/Documents/obsidian/ClickUp/**"]`.
 
-The editor bundles CodeMirror (`@codemirror/state|view|commands|language` plus
-`@lezer/markdown`; minified ~400 KB, loaded only on this page). It uses the bare
-markdown parser rather than `@codemirror/lang-markdown`, which would also pull in
-the HTML/CSS/JS grammars for embedded code blocks (~1 MB).
-
-### Why not the Files panel
-
-There is no API for an extension to make OpenChamber open a file, and
-`contributes.fileEditors` only exists from OpenChamber 2.0.4 (this app is 2.0.2).
-So the markdown tab is ours. It needs no files, no companion extension, and no
-grant outside the project. (The MIT companion
-[openchamber-files-ext](https://github.com/PylotLight/openchamber-files-ext)
-could still be installed for general file browsing; it is a standalone extension,
-not a viewer library, so it is not submoduled here.)
+Why not open Obsidian from the panel? OpenChamber only lets extensions open
+`http(s)` URLs (`host-bridge.ts` rejects anything else, and the guest iframe is
+`sandbox="allow-scripts"` with no top-navigation), while `obsidian://` links are
+classified as app links elsewhere in the app. So launching runs through the
+local MCP/CLI (`xdg-open obsidian://open?path=…`), which have full user rights.
 
 ## Develop
 
@@ -255,6 +258,8 @@ change. A folder install only needs a reload to pick up a rebuilt `main.js`.
   one huge, truncated response.
 - The panel reads the API on open, on connection, on workspace-setting change,
   and when you press **Refresh**; it does not poll in the background.
-- No OpenChamber capability is requested: the extension can draw its panel, read
-  the current session, and attach chips, but cannot send prompts, read files, or
-  start sessions on its own.
+- Only one OpenChamber capability is requested: `filesystem` for
+  `~/Documents/obsidian/ClickUp/**`, so note files live in your Obsidian vault.
+  The extension can draw its panel, read the current session, attach chips, and
+  read/write those files — but it cannot send prompts or launch outside apps on
+  its own (opening a note in Obsidian goes through the local MCP/CLI).

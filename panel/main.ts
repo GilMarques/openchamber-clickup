@@ -9,7 +9,6 @@ import type { AttachIssueRequest, GuestConnection, GuestSettings } from "@opench
 import {
   applyHostReady,
   mountBanner,
-  mountButton,
   mountCheckbox,
   mountEmpty,
   mountSearchField,
@@ -17,8 +16,6 @@ import {
   mountTabs,
 } from "@openchamber/sdk/ui";
 import type { TabsHandle, Tone } from "@openchamber/sdk/ui";
-import type { EditorView } from "@codemirror/view";
-import { makeEditor } from "./editor.ts";
 import {
   buildGroups,
   buildTree,
@@ -109,10 +106,8 @@ const frenteTabsHost = el("div", "frente-tabs");
 frenteRow.append(frenteTabsHost);
 frenteRow.hidden = true;
 tools.append(searchHost, frenteRow);
-const openTabsRow = el("div", "cu-otabs");
-openTabsRow.setAttribute("role", "tablist");
 const content = el("div", "content");
-root.append(bar, openTabsRow, tools, content);
+root.append(bar, tools, content);
 
 const REFRESH_ICON = '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>';
 
@@ -362,92 +357,6 @@ const touchUpdated = async (): Promise<void> => {
   }
 };
 
-// Open-note tabs, shared with the Notes page through `notes-ui.openIds`.
-// The rail only reads/writes the openIds field; the page owns the rest.
-let openTabIds: string[] = [];
-
-const readOpenTabs = async (): Promise<string[]> => {
-  try {
-    const ui = await host.storage.get("notes-ui");
-    if (ui && typeof ui === "object" && !Array.isArray(ui)) {
-      const ids = (ui as { openIds?: unknown }).openIds;
-      if (Array.isArray(ids)) return ids.filter((id): id is string => typeof id === "string");
-    }
-  } catch {
-    // Tabs are best-effort.
-  }
-  return [];
-};
-
-const writeOpenTabs = async (ids: string[]): Promise<void> => {
-  try {
-    const raw = await host.storage.get("notes-ui");
-    const base =
-      raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-    await host.storage.set("notes-ui", { ...base, openIds: ids });
-  } catch {
-    // Best-effort; tabs still work locally until the next write.
-  }
-  await touchUpdated();
-};
-
-const taskName = (taskId: string): string =>
-  state.tasks.find((entry) => entry.id === taskId)?.name || taskId;
-
-const renderOpenTabs = (): void => {
-  openTabsRow.replaceChildren();
-  if (openTabIds.length === 0) {
-    openTabsRow.hidden = true;
-    return;
-  }
-  openTabsRow.hidden = false;
-  for (const taskId of openTabIds) {
-    const tab = el("button", "cu-otab");
-    tab.type = "button";
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", String(taskId === editingNoteId));
-    if (taskId === editingNoteId) tab.classList.add("active");
-    const label = el("span", "cu-otab-label");
-    label.textContent = taskName(taskId);
-    label.title = taskName(taskId);
-    tab.append(label);
-    const close = el("button", "cu-otab-close");
-    close.type = "button";
-    close.textContent = "×";
-    close.setAttribute("aria-label", `Close ${taskName(taskId)}`);
-    close.addEventListener("click", (event) => {
-      event.stopPropagation();
-      void closeNoteTab(taskId);
-    });
-    tab.append(close);
-    tab.addEventListener("click", () => {
-      if (editingNoteId !== taskId) {
-        editingNoteId = taskId;
-        content.scrollTop = 0;
-        renderContent();
-      }
-    });
-    openTabsRow.append(tab);
-  }
-};
-
-const openNoteTab = async (taskId: string): Promise<void> => {
-  if (!openTabIds.includes(taskId)) {
-    openTabIds.push(taskId);
-    await writeOpenTabs(openTabIds);
-  }
-  editingNoteId = taskId;
-  content.scrollTop = 0;
-  renderContent();
-};
-
-const closeNoteTab = async (taskId: string): Promise<void> => {
-  openTabIds = openTabIds.filter((id) => id !== taskId);
-  if (editingNoteId === taskId) editingNoteId = null;
-  await writeOpenTabs(openTabIds);
-  renderContent();
-};
-
 const readDone = async (): Promise<void> => {  if (!doneLoaded) {
     try {
       doneByDate = parseDone(await host.storage.get("done"));
@@ -478,26 +387,102 @@ const persistDone = async (
   await recordEvent(action, taskId);
 };
 
-// Local notes live in storage (`note:<id>`); the rail panel only reads them to
-// paint the note icon solid. Editing happens in the ClickUp Notes page.
-const notes: Record<string, string> = {};
-let notesLoaded = false;
+// Local notes live as markdown files in the user's Obsidian vault, one per
+// task. The panel never edits them — clicking the note icon ensures the file
+// exists and points Obsidian at it. Nothing is ever sent to ClickUp.
+const DEFAULT_NOTES_DIR = "~/Documents/obsidian/ClickUp";
 
-const readNotes = async (): Promise<void> => {
-  if (notesLoaded) return;
-  notesLoaded = true;
+const notesDir = (): string => {
+  const configured = state.settings["notes-dir"]?.trim().replace(/\/+$/, "");
+  return configured || DEFAULT_NOTES_DIR;
+};
+
+const noteFileName = (taskId: string): string => `${taskId.replace(/[^A-Za-z0-9_-]/g, "_")}.md`;
+
+const notePath = (taskId: string): string => `${notesDir()}/${noteFileName(taskId)}`;
+
+/** Task ids that have a note file, from a single directory listing. */
+let noteFiles = new Set<string>();
+
+const readNoteFiles = async (): Promise<void> => {
   try {
-    const keys = await host.storage.keys();
-    const noteKeys = keys.filter((key) => key.startsWith("note:"));
-    const values = await Promise.all(
-      noteKeys.map(async (key) => [key, await host.storage.get(key)] as const),
+    const { entries } = await host.listDir(notesDir());
+    noteFiles = new Set(
+      entries
+        .filter((entry) => entry.kind === "file" && entry.name.endsWith(".md"))
+        .map((entry) => entry.name.slice(0, -".md".length)),
     );
-    for (const [key, value] of values) {
-      if (typeof value === "string" && value) notes[key.slice("note:".length)] = value;
-    }
   } catch {
-    // Notes are local-only; start empty if storage is unavailable.
+    // Missing folder (or denied) simply means no notes yet.
+    noteFiles = new Set();
   }
+};
+
+const noteTemplate = (task: ClickUpTask, body: string): string => {
+  const url = task.url || `${DEFAULT_ORIGIN}/t/${task.id}`;
+  const meta = [task.custom_id || task.id, sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
+    .filter(Boolean)
+    .join(" · ");
+  return `# ${task.name || task.custom_id || task.id}\n\n[${task.custom_id || task.id}](${url})${meta ? ` · ${meta}` : ""}\n\n---\n\n${body}`;
+};
+
+/** One-time move of pre-file notes (`note:<id>` storage keys) into the vault. */
+const migrateStorageNotes = async (): Promise<void> => {
+  let keys: string[];
+  try {
+    keys = (await host.storage.keys()).filter((key) => key.startsWith("note:"));
+  } catch {
+    return;
+  }
+  if (keys.length === 0) return;
+  for (const key of keys) {
+    const taskId = key.slice("note:".length);
+    try {
+      const value = await host.storage.get(key);
+      if (typeof value === "string" && value) {
+        const path = notePath(taskId);
+        try {
+          await host.readFile(path);
+        } catch {
+          const task = state.tasks.find((entry) => entry.id === taskId);
+          await host.writeFile(path, task ? noteTemplate(task, value) : value);
+          noteFiles.add(taskId);
+          syncNoteButton(taskId);
+        }
+      }
+      await host.storage.delete(key);
+    } catch {
+      // Leave the key; the next load retries.
+    }
+  }
+};
+
+/** Ensure the note file exists (creating it from a template), then hand it to Obsidian. */
+const openInObsidian = (task: ClickUpTask): void => {
+  void (async () => {
+    const path = notePath(task.id);
+    try {
+      await host.readFile(path);
+    } catch {
+      try {
+        await host.writeFile(path, noteTemplate(task, ""));
+      } catch (error) {
+        await host.toast({
+          kind: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      noteFiles.add(task.id);
+      renderContent();
+      await recordEvent("note-set", task.id);
+    }
+    await host.toast({
+      kind: "success",
+      message: `Note ready in your Obsidian vault: ClickUp/${noteFileName(task.id)}`,
+      copy: { text: path },
+    });
+  })();
 };
 
 // Append-only history with timestamps. Stored only; nothing shows it in the UI.
@@ -546,9 +531,7 @@ const recordEvent = async (type: string, taskId: string, date?: string): Promise
 /** Force the next read to pick up changes made outside the panel (e.g. by a script). */
 const resetLocal = (): void => {
   doneLoaded = false;
-  notesLoaded = false;
   eventsLoaded = false;
-  for (const taskId of Object.keys(notes)) delete notes[taskId];
   events.length = 0;
 };
 
@@ -560,10 +543,7 @@ const pollLocal = async (): Promise<void> => {
   lastUpdated = stamp;
   resetLocal();
   await readDone();
-  await readNotes();
-  openTabIds = (await readOpenTabs()).filter((id) => notes[id] || id === editingNoteId);
-  if (editingNoteId && !openTabIds.includes(editingNoteId)) openTabIds.push(editingNoteId);
-  if (editingNoteId) return;
+  await readNoteFiles();
   if (state.connected && state.status.kind === "idle") {
     const top = content.scrollTop;
     renderContent();
@@ -611,121 +591,19 @@ const attachTask = (task: ClickUpTask): void => {
 
 const NOTE_ICON =
   '<path d="M15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z"/><path d="M15 21v-4a2 2 0 0 1 2-2h4"/>';
-const BACK_ICON = '<line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>';
 
 const noteButtonByTask = new Map<string, HTMLButtonElement>();
 
-// Full-panel note editor: the note icon swaps the whole panel for a markdown
-// editor instead of expanding anything under the row.
-let editingNoteId: string | null = null;
-let panelEditorView: EditorView | null = null;
-
-const destroyPanelEditor = (): void => {
-  panelEditorView?.destroy();
-  panelEditorView = null;
-};
-
-const persistPanelNote = async (taskId: string, text: string): Promise<void> => {
-  const trimmed = text.trim();
-  if (trimmed) await host.storage.set(`note:${taskId}`, trimmed);
-  else await host.storage.delete(`note:${taskId}`);
-  if (trimmed) notes[taskId] = trimmed;
-  else delete notes[taskId];
-  await recordEvent(trimmed ? "note-set" : "note-delete", taskId);
-};
-
 const makeNoteButton = (task: ClickUpTask): HTMLButtonElement => {
-  const button = createIconButton("Edit note", NOTE_ICON, () => void openNoteTab(task.id));
-  button.dataset.has = notes[task.id] ? "true" : "false";
+  const button = createIconButton("Open note in Obsidian", NOTE_ICON, () => openInObsidian(task));
+  button.dataset.has = noteFiles.has(task.id) ? "true" : "false";
   noteButtonByTask.set(task.id, button);
   return button;
 };
 
-const renderNoteView = (task: ClickUpTask): void => {
-  const head = el("div", "cu-noteview-head");
-  const back = createIconButton("Back to tasks", BACK_ICON, () => {
-    editingNoteId = null;
-    destroyPanelEditor();
-    renderContent();
-  });
-  const titleWrap = el("div", "cu-noteview-titlewrap");
-  const titleEl = el("div", "cu-noteview-title");
-  titleEl.textContent = task.name || shortId(task);
-  const meta = el("div", "cu-noteview-meta");
-  meta.textContent = [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
-    .filter(Boolean)
-    .join(" · ");
-  titleWrap.append(titleEl, meta);
-  head.append(back, titleWrap);
-  content.append(head);
-
-  const editorHost = el("div", "editor");
-  content.append(editorHost);
-
-  const actions = el("div", "cu-noteview-actions");
-  content.append(actions);
-
-  const close = (): void => {
-    editingNoteId = null;
-    destroyPanelEditor();
-    renderContent();
-  };
-  const save = async (): Promise<void> => {
-    const value = panelEditorView?.state.doc.toString() ?? "";
-    try {
-      await persistPanelNote(task.id, value);
-    } catch (error) {
-      await host.toast({
-        kind: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
-      return;
-    }
-    close();
-  };
-  active.push(
-    mountButton(actions, { label: "Save", size: "xs", onClick: () => void save() }),
-    mountButton(actions, {
-      label: "Cancel",
-      variant: "ghost",
-      size: "xs",
-      onClick: () => {
-        void (async () => {
-          if (!notes[task.id]) {
-            openTabIds = openTabIds.filter((id) => id !== task.id);
-            await writeOpenTabs(openTabIds);
-          }
-          close();
-        })();
-      },
-    }),
-  );
-  if (notes[task.id]) {
-    active.push(
-      mountButton(actions, {
-        label: "Delete",
-        variant: "destructive",
-        size: "xs",
-        onClick: async () => {
-          try {
-            await persistPanelNote(task.id, "");
-          } catch (error) {
-            await host.toast({
-              kind: "error",
-              message: error instanceof Error ? error.message : String(error),
-            });
-            return;
-          }
-          openTabIds = openTabIds.filter((id) => id !== task.id);
-          await writeOpenTabs(openTabIds);
-          close();
-        },
-      }),
-    );
-  }
-  const view = makeEditor(editorHost, notes[task.id] ?? "", () => void save());
-  panelEditorView = view;
-  view.focus();
+const syncNoteButton = (taskId: string): void => {
+  const button = noteButtonByTask.get(taskId);
+  if (button) button.dataset.has = noteFiles.has(taskId) ? "true" : "false";
 };
 
 const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
@@ -837,17 +715,7 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
 // --- Rendering --------------------------------------------------------------
 
 const renderContent = () => {
-  destroyPanelEditor();
   clearContent();
-  renderOpenTabs();
-  if (editingNoteId) {
-    const task = state.tasks.find((entry) => entry.id === editingNoteId);
-    if (task) {
-      renderNoteView(task);
-      return;
-    }
-    editingNoteId = null;
-  }
   frenteRow.hidden = true;
   if (!state.connected) {
     active.push(
@@ -935,15 +803,14 @@ const load = async (force: boolean): Promise<void> => {
       resetLocal();
     }
     await readDone();
-    await readNotes();
-    openTabIds = (await readOpenTabs()).filter((id) => notes[id] || id === editingNoteId);
-    if (editingNoteId && !openTabIds.includes(editingNoteId)) openTabIds.push(editingNoteId);
+    await readNoteFiles();
     await readEvents();
     lastUpdated = await readUpdated();
     await ensureContext();
     const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user!.id), state.filter === "all");
     if (current !== generation) return;
     state.tasks = tasks;
+    await migrateStorageNotes();
     state.status = { kind: "idle" };
     const open = tasks.filter((task) => !isClosed(task)).length;
     void host.setBadge(state.filter === "all" ? open : tasks.length).catch(() => undefined);
@@ -999,9 +866,10 @@ host.onReady((ctx) => {
 host.onConnection(applyConnection);
 
 host.onSettings((settings) => {
-  const changed = (settings?.["team-id"] ?? "") !== (state.settings["team-id"] ?? "");
+  const teamChanged = (settings?.["team-id"] ?? "") !== (state.settings["team-id"] ?? "");
+  const dirChanged = (settings?.["notes-dir"] ?? "") !== (state.settings["notes-dir"] ?? "");
   state.settings = settings ?? {};
-  if (changed && state.connected) void load(true);
+  if ((teamChanged || dirChanged) && state.connected) void load(true);
 });
 
 renderContent();

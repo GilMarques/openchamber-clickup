@@ -5,10 +5,11 @@ description: Read and manipulate the OpenChamber "ClickUp Tasks" extension local
 
 # ClickUp Tasks extension
 
-The OpenChamber extension lives at `/home/gil/clickup-tasks` (panel, page,
-`/clickup` command, MCP tool styling). Its **local state** (notes + done ticks)
-is plain JSON on the OpenChamber server and can be read or written by an agent.
-Nothing here writes to ClickUp unless you explicitly call the ClickUp API.
+The OpenChamber extension lives at `/home/gil/clickup-tasks` (rail panel,
+`/clickup` command, MCP tool styling). Notes live as markdown files in the
+user's Obsidian vault (`~/Documents/obsidian/ClickUp/<taskId>.md`); done ticks
+and the event log live as plain JSON on the OpenChamber server. Nothing here
+writes to ClickUp unless you explicitly call the ClickUp API.
 
 ## Preferred: the `clickup` MCP server
 
@@ -18,8 +19,9 @@ Registered as a local MCP server (`mcp/server.mjs`). Tools:
 | --- | --- |
 | `tasks_list` | Compact assigned tasks (`includeClosed`, `limit`) |
 | `task_get` | One task by id / custom id |
-| `notes_list` | All local notes |
-| `note_get` / `note_set` / `note_delete` | Local note for one task |
+| `notes_list` | All vault notes (task id + body) |
+| `note_get` / `note_set` / `note_delete` | Vault note file for one task |
+| `note_open` | Ensure the note file, then open it in Obsidian |
 | `done_list` | Task ids ticked on a date (default today) |
 | `done_add` / `done_remove` | Tick / untick a task for a date |
 | `events_list` | Timestamped history of note/done changes (`taskId`, `type`, `limit`) |
@@ -33,6 +35,7 @@ restart OpenChamber/OpenCode or fall back to the CLI.
 node /home/gil/clickup-tasks/scripts/state.mjs notes
 node /home/gil/clickup-tasks/scripts/state.mjs note-set <taskId> "text"
 node /home/gil/clickup-tasks/scripts/state.mjs note-del <taskId>
+node /home/gil/clickup-tasks/scripts/state.mjs note-open <taskId>
 node /home/gil/clickup-tasks/scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
 node /home/gil/clickup-tasks/scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
 node /home/gil/clickup-tasks/scripts/state.mjs done-list [YYYY-MM-DD]
@@ -42,14 +45,15 @@ node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
 ## Storage contract
 
 ```
+~/Documents/obsidian/ClickUp/<taskId>.md   (notes; header + markdown body)
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
-  "note:<taskId>": "text",
   "events": [ { "at": "2026-10-04T21:44:03.604Z", "type": "done-add", "taskId": "…", "date": "2026-10-04" } ],
   "updated": "<epoch ms>" }
 ```
 
-- `note:<taskId>` is one key per task; text is plain (may contain newlines).
+- One markdown file per task: a header (`# title`, link + sprint/status/list)
+  then `---`, then the body. `note_get`/`notes_list` return the body only.
 - `done` keeps the last 60 days, one entry per date.
 - `events` is an append-only timestamped history of every note/done change
   (`done-add`, `done-remove`, `note-set`, `note-delete`), newest last, capped at
@@ -60,6 +64,9 @@ node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
   `scripts/state.mjs` and the MCP server do this for you.
 - Always write atomically (temp file + rename, mode 600) so a concurrent panel
   write cannot interleave. Prefer the CLI/MCP over hand-editing.
+- Notes dir override: `$CLICKUP_NOTES_DIR` (scripts/MCP) or the extension's
+  `notes-dir` setting (panel). Task ids are validated (`^[A-Za-z0-9_-]+$`) and
+  never used as raw paths.
 
 The panel also re-reads on a forced refresh (the refresh icon).
 
@@ -76,18 +83,15 @@ The panel also re-reads on a forced refresh (the refresh icon).
 
 ## Notes
 
-- Notes are **markdown**, rendered and editable on the **ClickUp Notes** page
-  (main area → **Extension pages**) with CodeMirror highlighting; Ctrl/Cmd+S
-  saves. Keep agent-written notes markdown so they render.
+- Notes are **markdown files in the Obsidian vault**
+  (`~/Documents/obsidian/ClickUp/<taskId>.md`): header plus body. Keep
+  agent-written bodies markdown. The extension has no editor anymore — Obsidian
+  is the editor, launched via the `note_open` tool or
+  `state.mjs note-open <taskId>` (`xdg-open obsidian://open?path=…`). The rail
+  panel cannot launch outside apps (guest `open-url` is `http(s)`-only), so its
+  note icon only ensures the file exists and toasts the vault path.
 - The panel groups by frente, orders by sprint, shows a workflow-status dot, a
   priority badge, expandable subtasks, a done checkbox, and a note icon that
-  turns solid when a note exists. Clicking the note icon swaps the whole panel
-  for a CodeMirror markdown editor for that note, with a back button to the task
-  list; there is no inline editor under the row. Open notes also appear as a
-  tabs row under the header, shared with the ClickUp Notes page through
-  `notes-ui.openIds`.
-- The Files panel cannot be driven: the guest API has no "open file" call in
-  OpenChamber 2.0.2, and `contributes.fileEditors` only exists from 2.0.4. Use
-  the ClickUp Notes page.
+  turns solid when a note file exists.
 - Source, docs, and the same CLI/MCP live in the repo
   `github.com/GilMarques/openchamber-clickup`.
