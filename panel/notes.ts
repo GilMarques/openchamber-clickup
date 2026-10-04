@@ -1,10 +1,17 @@
-// Full-screen "ClickUp Notes" page (contributes.page).
+// Full-screen "ClickUp Notes" page (contributes.page), Files-style split layout.
 //
-// Opened from the Extension pages menu in the main area. Every local note is
-// rendered as markdown and can be edited in place with CodeMirror (markdown
-// highlighting, Cmd/Ctrl+S to save). Notes stay local to OpenChamber.
+// Opened from the Extension pages menu in the main area. Layout mirrors the
+// host Files view: a tabs row of open notes on top, a hiddable notes list on
+// the left, and a hiddable viewer on the right with per-note view/edit modes.
+// Notes stay local to OpenChamber.
 import { connectHost } from "@openchamber/sdk";
-import { applyHostReady, mountButton, mountEmpty, mountSpinner } from "@openchamber/sdk/ui";
+import {
+  applyHostReady,
+  mountButton,
+  mountEmpty,
+  mountSearchField,
+  mountSpinner,
+} from "@openchamber/sdk/ui";
 import { marked } from "marked";
 import { EditorState } from "@codemirror/state";
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from "@codemirror/view";
@@ -35,44 +42,83 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): 
   return node;
 };
 
+type ViewMode = "view" | "edit";
+
+// --- Shell (built once) -----------------------------------------------------
+
 const bar = el("div", "bar");
 const title = el("div", "title");
 title.textContent = "ClickUp Notes";
 const count = el("div", "count");
 const spacer = el("div", "spacer");
+const listToggleHost = el("div");
+const viewerToggleHost = el("div");
 const refreshHost = el("div");
-bar.append(title, count, spacer, refreshHost);
-const content = el("div", "content");
-root.append(bar, content);
+bar.append(title, count, spacer, listToggleHost, viewerToggleHost, refreshHost);
 
-let active: Array<{ dispose: () => void }> = [];
+const tabsHost = el("div", "tabs");
+tabsHost.setAttribute("role", "tablist");
+
+const body = el("div", "nbody");
+const left = el("section", "left");
+const leftHead = el("div", "left-head");
+const searchHost = el("div", "left-search");
+leftHead.append(searchHost);
+const leftList = el("div", "left-list");
+leftList.setAttribute("role", "listbox");
+left.append(leftHead, leftList);
+
+const right = el("section", "right");
+const viewerHead = el("div", "viewer-head");
+const viewerTitle = el("div", "viewer-title");
+const viewerActions = el("div", "viewer-actions");
+viewerHead.append(viewerTitle, viewerActions);
+const viewerMeta = el("div", "viewer-meta");
+const viewerBody = el("div", "viewer-body");
+right.append(viewerHead, viewerMeta, viewerBody);
+
+body.append(left, right);
+root.append(bar, tabsHost, body);
+
+// --- State ------------------------------------------------------------------
+
+let notes: Record<string, string> = {};
+let lastNoteAt: Record<string, string> = {};
+let tasks = new Map<string, ClickUpTask>();
+let ids: string[] = [];
+let openIds: string[] = [];
+let activeId: string | null = null;
+let modes: Record<string, ViewMode> = {};
+let drafts: Record<string, string> = {};
+let leftVisible = true;
+let viewerVisible = true;
+let query = "";
 let settings: Record<string, string> = {};
+let editorView: EditorView | null = null;
+let editorTaskId: string | null = null;
+let loading = false;
+let loadError: string | null = null;
+let lastUpdated: string | null = null;
+
 const frenteFolder = (): string => settings["frente-folder"]?.trim() || "Frentes";
 const sprintField = (): string => settings["sprint-field"]?.trim() || "Sprints";
 
-const clear = () => {
-  for (const handle of active) handle.dispose();
-  active = [];
-  content.replaceChildren();
-  content.classList.remove("cu-center");
-};
-
-const updateCount = () => {
-  const total = content.querySelectorAll(".card").length;
-  count.textContent = total === 1 ? "1 note" : `${total} notes`;
+let handles: Array<{ dispose: () => void }> = [];
+const track = (handle: { dispose: () => void }): void => {
+  handles.push(handle);
 };
 
 // --- Data -------------------------------------------------------------------
 
-const requestJson = async <T,>(path: string, query?: Record<string, string>): Promise<T> => {
-  const result = await host.request({ method: "GET", path, query });
+const requestJson = async <T,>(path: string, queryParams?: Record<string, string>): Promise<T> => {
+  const result = await host.request({ method: "GET", path, query: queryParams });
   if (result.status === 401 || result.status === 403) throw new Error("ClickUp rejected the token.");
   if (result.status < 200 || result.status >= 300) throw new Error(`ClickUp answered ${result.status}`);
   return JSON.parse(result.body) as T;
 };
 
 const readNotes = async (): Promise<Record<string, string>> => {
-  const notes: Record<string, string> = {};
+  const out: Record<string, string> = {};
   const keys = await host.storage.keys();
   const entries = await Promise.all(
     keys
@@ -80,9 +126,9 @@ const readNotes = async (): Promise<Record<string, string>> => {
       .map(async (key) => [key.slice("note:".length), await host.storage.get(key)] as const),
   );
   for (const [taskId, text] of entries) {
-    if (typeof text === "string" && text) notes[taskId] = text;
+    if (typeof text === "string" && text) out[taskId] = text;
   }
-  return notes;
+  return out;
 };
 
 /** Latest note-set timestamp per task, from the local event log. */
@@ -104,17 +150,26 @@ const readLastNoteAt = async (): Promise<Record<string, string>> => {
   return last;
 };
 
+const readUpdated = async (): Promise<string | null> => {
+  try {
+    const value = await host.storage.get("updated");
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+};
+
 const loadTasks = async (): Promise<Map<string, ClickUpTask>> => {
   const me = await requestJson<{ user: { id: number } }>("/api/v2/user");
   const teams = await requestJson<{ teams: Array<{ id: string | number }> }>("/api/v2/team");
-  const request: ClickUpRequest = (path, query) => host.request({ method: "GET", path, query });
-  const tasks = await fetchAssignedTasks(
+  const request: ClickUpRequest = (path, queryParams) => host.request({ method: "GET", path, query: queryParams });
+  const fetched = await fetchAssignedTasks(
     request,
     (teams.teams ?? []).map((team) => String(team.id)),
     String(me.user.id),
     true,
   );
-  return new Map(tasks.map((task) => [task.id, task]));
+  return new Map(fetched.map((task) => [task.id, task]));
 };
 
 /** Write a note (or delete it when empty), append the event, and bump the poll marker. */
@@ -142,6 +197,35 @@ const persistNote = async (taskId: string, text: string): Promise<void> => {
   }
 };
 
+const saveUI = async (): Promise<void> => {
+  try {
+    await host.storage.set("notes-ui", { openIds, activeId, leftVisible, viewerVisible });
+  } catch {
+    // UI prefs are best-effort.
+  }
+};
+
+const loadUI = async (): Promise<void> => {
+  try {
+    const stored = (await host.storage.get("notes-ui")) as {
+      openIds?: unknown;
+      activeId?: unknown;
+      leftVisible?: unknown;
+      viewerVisible?: unknown;
+    } | null;
+    if (stored && typeof stored === "object") {
+      if (Array.isArray(stored.openIds)) {
+        openIds = stored.openIds.filter((id): id is string => typeof id === "string");
+      }
+      if (typeof stored.activeId === "string" || stored.activeId === null) activeId = stored.activeId;
+      if (typeof stored.leftVisible === "boolean") leftVisible = stored.leftVisible;
+      if (typeof stored.viewerVisible === "boolean") viewerVisible = stored.viewerVisible;
+    }
+  } catch {
+    // Defaults stand.
+  }
+};
+
 // --- Markdown rendering -----------------------------------------------------
 
 /** Markdown to HTML, with scripts/event handlers stripped before it lands in the DOM. */
@@ -160,7 +244,7 @@ const renderMarkdown = (container: HTMLElement, text: string): void => {
   container.innerHTML = doc.body.innerHTML;
 };
 
-content.addEventListener("click", (event) => {
+root.addEventListener("click", (event) => {
   const anchor = (event.target as HTMLElement | null)?.closest("a");
   const href = anchor?.getAttribute("href");
   if (href && /^https?:/i.test(href)) {
@@ -222,164 +306,430 @@ const makeEditor = (parent: HTMLElement, text: string, save: () => void): Editor
   return new EditorView({ state, parent });
 };
 
-// --- Cards ------------------------------------------------------------------
+const destroyEditor = (): void => {
+  editorView?.destroy();
+  editorView = null;
+  editorTaskId = null;
+};
 
-const metaFor = (task: ClickUpTask | undefined, taskId: string, savedAt?: string): string => {
+// --- Helpers ----------------------------------------------------------------
+
+const taskTitle = (taskId: string): string => tasks.get(taskId)?.name ?? taskId;
+
+const metaFor = (taskId: string): string => {
+  const task = tasks.get(taskId);
   const parts = task
     ? [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
     : [];
-  if (savedAt) parts.push(`saved ${new Date(savedAt).toLocaleString()}`);
+  if (lastNoteAt[taskId]) parts.push(`saved ${new Date(lastNoteAt[taskId]).toLocaleString()}`);
   return parts.filter(Boolean).join(" · ") || taskId;
 };
 
-const renderCard = (
-  taskId: string,
-  task: ClickUpTask | undefined,
-  initialText: string,
-  initialSavedAt: string | undefined,
-): HTMLElement => {
-  let text = initialText;
-  let savedAt = initialSavedAt;
+const matchesQuery = (taskId: string): boolean => {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const task = tasks.get(taskId);
+  return `${task?.name ?? ""} ${taskId} ${notes[taskId] ?? ""}`.toLowerCase().includes(q);
+};
 
-  const card = el("div", "card");
-  const head = el("div", "card-head");
-  const heading = el("div", "card-title");
-  const link = el("a");
-  link.href = task?.url ?? `https://app.clickup.com/t/${taskId}`;
-  link.textContent = task?.name ?? taskId;
-  heading.append(link);
-  const actions = el("div", "card-actions");
-  head.append(heading, el("div", "spacer"), actions);
-  const meta = el("div", "card-meta");
-  const body = el("div", "card-body");
-  card.append(head, meta, body);
+// --- Tabs -------------------------------------------------------------------
 
-  const paintMeta = () => {
-    meta.textContent = metaFor(task, taskId, savedAt);
-  };
+const openNote = (taskId: string): void => {
+  if (!notes[taskId]) return;
+  if (!openIds.includes(taskId)) openIds.push(taskId);
+  activeId = taskId;
+  void saveUI();
+  renderTabs();
+  renderList();
+  renderViewer();
+};
 
-  const showView = () => {
-    actions.replaceChildren();
-    active.push(
-      mountButton(actions, {
+const closeTab = (taskId: string): void => {
+  openIds = openIds.filter((id) => id !== taskId);
+  if (activeId === taskId) {
+    activeId = openIds.length > 0 ? openIds[openIds.length - 1] : null;
+  }
+  // Drafts survive a closed tab so unsaved text is not lost.
+  void saveUI();
+  renderTabs();
+  renderList();
+  renderViewer();
+};
+
+const renderTabs = (): void => {
+  tabsHost.replaceChildren();
+  if (openIds.length === 0) {
+    tabsHost.hidden = true;
+    return;
+  }
+  tabsHost.hidden = false;
+  for (const taskId of openIds) {
+    const tab = el("button", "tab");
+    tab.type = "button";
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(taskId === activeId));
+    if (taskId === activeId) tab.classList.add("active");
+    const label = el("span", "tab-label");
+    label.textContent = taskTitle(taskId);
+    label.title = taskTitle(taskId);
+    tab.append(label);
+    if (drafts[taskId] !== undefined) {
+      const dot = el("span", "tab-dirty");
+      dot.title = "Unsaved changes";
+      tab.append(dot);
+    }
+    const close = el("button", "tab-close");
+    close.type = "button";
+    close.textContent = "×";
+    close.setAttribute("aria-label", `Close ${taskTitle(taskId)}`);
+    close.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeTab(taskId);
+    });
+    tab.append(close);
+    tab.addEventListener("click", () => {
+      if (activeId !== taskId) {
+        activeId = taskId;
+        void saveUI();
+        renderTabs();
+        renderList();
+        renderViewer();
+      }
+    });
+    tabsHost.append(tab);
+  }
+};
+
+// --- Left list ---------------------------------------------------------------
+
+const renderList = (): void => {
+  leftList.replaceChildren();
+  const visible = ids.filter(matchesQuery);
+  for (const taskId of visible) {
+    const row = el("button", "note-row");
+    row.type = "button";
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(taskId === activeId));
+    if (taskId === activeId) row.classList.add("active");
+    const rowTitle = el("div", "note-row-title");
+    rowTitle.textContent = taskTitle(taskId);
+    rowTitle.title = taskTitle(taskId);
+    const rowSub = el("div", "note-row-sub");
+    rowSub.textContent = metaFor(taskId);
+    row.append(rowTitle, rowSub);
+    if (drafts[taskId] !== undefined) {
+      const dot = el("span", "draft-dot");
+      dot.title = "Unsaved changes";
+      row.append(dot);
+    }
+    row.addEventListener("click", () => openNote(taskId));
+    leftList.append(row);
+  }
+  if (visible.length === 0) {
+    const empty = el("div", "left-empty");
+    empty.textContent = query.trim() ? "No matching notes" : "No notes";
+    leftList.append(empty);
+  }
+};
+
+// --- Right viewer ------------------------------------------------------------
+
+const paintViewerActions = (taskId: string, mode: ViewMode): void => {
+  viewerActions.replaceChildren();
+  if (mode === "view") {
+    track(
+      mountButton(viewerActions, {
         label: "Edit",
         variant: "ghost",
         size: "xs",
-        onClick: () => showEdit(),
+        onClick: () => {
+          modes[taskId] = "edit";
+          renderViewer();
+        },
       }),
     );
-    body.replaceChildren();
-    const rendered = el("div", "md");
-    renderMarkdown(rendered, text);
-    body.append(rendered);
-  };
-
-  const showEdit = () => {
-    actions.replaceChildren();
-    body.replaceChildren();
-    const editorHost = el("div", "editor");
-    body.append(editorHost);
-    let view: EditorView | null = null;
-
-    const save = async () => {
-      const value = (view?.state.doc.toString() ?? text).trim();
-      try {
-        await persistNote(taskId, value);
-      } catch (error) {
-        await host.toast({
-          kind: "error",
-          message: error instanceof Error ? error.message : String(error),
-        });
-        return;
-      }
-      text = value;
-      savedAt = new Date().toISOString();
-      view?.destroy();
-      paintMeta();
-      if (!text) {
-        card.remove();
-        updateCount();
-        return;
-      }
-      showView();
-    };
-
-    const cancel = () => {
-      view?.destroy();
-      showView();
-    };
-
-    view = makeEditor(editorHost, text, () => void save());
-    active.push(
-      mountButton(actions, { label: "Save", size: "xs", onClick: () => void save() }),
-      mountButton(actions, { label: "Cancel", variant: "ghost", size: "xs", onClick: cancel }),
+    return;
+  }
+  track(
+    mountButton(viewerActions, {
+      label: "Save",
+      size: "xs",
+      onClick: () => void saveEdit(taskId),
+    }),
+  );
+  track(
+    mountButton(viewerActions, {
+      label: "Cancel",
+      variant: "ghost",
+      size: "xs",
+      onClick: () => {
+        delete drafts[taskId];
+        modes[taskId] = "view";
+        renderTabs();
+        renderList();
+        renderViewer();
+      },
+    }),
+  );
+  if (notes[taskId]) {
+    track(
+      mountButton(viewerActions, {
+        label: "Delete",
+        variant: "destructive",
+        size: "xs",
+        onClick: () => void deleteNote(taskId),
+      }),
     );
-    if (text) {
-      active.push(
-        mountButton(actions, {
-          label: "Delete",
-          variant: "destructive",
-          size: "xs",
-          onClick: async () => {
-            await persistNote(taskId, "");
-            view?.destroy();
-            card.remove();
-            updateCount();
-          },
-        }),
-      );
-    }
-    view.focus();
-  };
-
-  paintMeta();
-  showView();
-  return card;
+  }
 };
 
-// --- Page -------------------------------------------------------------------
-
-const render = async (): Promise<void> => {
-  clear();
-  refreshButton?.update({ loading: true, disabled: true });
-  content.classList.add("cu-center");
-  active.push(mountSpinner(content, { label: "Loading notes" }));
+const saveEdit = async (taskId: string): Promise<void> => {
+  const value = (editorView && editorTaskId === taskId ? editorView.state.doc.toString() : drafts[taskId] ?? "").trim();
   try {
-    const [notes, lastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
-    let tasks = new Map<string, ClickUpTask>();
-    try {
-      tasks = await loadTasks();
-    } catch {
-      // Task titles are a nicety; notes still render without them.
-    }
-    clear();
-    const ids = Object.keys(notes).sort(
-      (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
-    );
-    if (ids.length === 0) {
-      count.textContent = "0 notes";
-      active.push(
-        mountEmpty(content, {
-          title: "No local notes yet",
-          body: "Add one from the ClickUp Tasks panel, or let an agent write one.",
-        }),
-      );
-      return;
-    }
-    for (const taskId of ids) {
-      content.append(renderCard(taskId, tasks.get(taskId), notes[taskId], lastNoteAt[taskId]));
-    }
-    updateCount();
+    await persistNote(taskId, value);
   } catch (error) {
-    clear();
-    active.push(
-      mountEmpty(content, {
-        title: "Could not load notes",
-        body: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    await host.toast({
+      kind: "error",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+  if (value) {
+    notes[taskId] = value;
+    lastNoteAt[taskId] = new Date().toISOString();
+  } else {
+    delete notes[taskId];
+  }
+  delete drafts[taskId];
+  modes[taskId] = "view";
+  ids = Object.keys(notes).sort(
+    (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
+  );
+  if (!notes[taskId]) {
+    closeTab(taskId);
+    return;
+  }
+  renderTabs();
+  renderList();
+  renderViewer();
+  updateCount();
+};
+
+const deleteNote = async (taskId: string): Promise<void> => {
+  try {
+    await persistNote(taskId, "");
+  } catch (error) {
+    await host.toast({
+      kind: "error",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+  delete notes[taskId];
+  delete drafts[taskId];
+  delete modes[taskId];
+  ids = ids.filter((id) => id !== taskId);
+  closeTab(taskId);
+  updateCount();
+};
+
+const renderViewer = (): void => {
+  destroyEditor();
+  for (const handle of handles) handle.dispose();
+  handles = [];
+  viewerTitle.replaceChildren();
+  viewerMeta.textContent = "";
+  viewerBody.replaceChildren();
+
+  if (!viewerVisible) {
+    right.hidden = true;
+    return;
+  }
+  right.hidden = false;
+  paintToggles();
+
+  if (!activeId || !notes[activeId]) {
+    const empty = el("div", "viewer-empty");
+    empty.textContent = openIds.length > 0 ? "Select a note" : "No notes open";
+    viewerBody.append(empty);
+    return;
+  }
+
+  const taskId = activeId;
+  const task = tasks.get(taskId);
+  const link = el("a", "viewer-link");
+  link.href = task?.url ?? `https://app.clickup.com/t/${taskId}`;
+  link.textContent = task?.name ?? taskId;
+  viewerTitle.append(link);
+  viewerMeta.textContent = metaFor(taskId);
+
+  const mode = modes[taskId] ?? "view";
+  paintViewerActions(taskId, mode);
+  if (mode === "view") {
+    const rendered = el("div", "md");
+    renderMarkdown(rendered, notes[taskId]);
+    viewerBody.append(rendered);
+    return;
+  }
+
+  const editorHost = el("div", "editor");
+  viewerBody.append(editorHost);
+  const startingText = drafts[taskId] ?? notes[taskId] ?? "";
+  const save = () => void saveEdit(taskId);
+  const view = makeEditor(editorHost, startingText, save);
+  editorView = view;
+  editorTaskId = taskId;
+  view.contentDOM.addEventListener("input", () => {
+    drafts[taskId] = view.state.doc.toString();
+    renderTabs();
+    renderList();
+  });
+  view.focus();
+};
+
+// --- Toggles, count, shell controls ------------------------------------------
+
+const paintToggles = (): void => {
+  listToggleHost.replaceChildren();
+  viewerToggleHost.replaceChildren();
+  track(
+    mountButton(listToggleHost, {
+      label: leftVisible ? "Hide list" : "Show list",
+      variant: "ghost",
+      size: "xs",
+      onClick: () => {
+        leftVisible = !leftVisible;
+        left.hidden = !leftVisible;
+        void saveUI();
+        paintToggles();
+      },
+    }),
+  );
+  track(
+    mountButton(viewerToggleHost, {
+      label: viewerVisible ? "Hide viewer" : "Show viewer",
+      variant: "ghost",
+      size: "xs",
+      onClick: () => {
+        viewerVisible = !viewerVisible;
+        void saveUI();
+        renderViewer();
+      },
+    }),
+  );
+};
+
+const updateCount = (): void => {
+  count.textContent = ids.length === 1 ? "1 note" : `${ids.length} notes`;
+};
+
+let listToggleInit = false;
+const initShellControls = (): void => {
+  if (listToggleInit) return;
+  listToggleInit = true;
+  track(
+    mountSearchField(searchHost, {
+      value: "",
+      placeholder: "Filter notes",
+      label: "Filter notes",
+      onChange: (value) => {
+        query = value;
+        renderList();
+      },
+    }),
+  );
+  paintToggles();
+};
+
+// --- Load + poll -------------------------------------------------------------
+
+const reconcile = (): void => {
+  ids = Object.keys(notes).sort(
+    (a, b) => (lastNoteAt[b] ?? "").localeCompare(lastNoteAt[a] ?? "") || a.localeCompare(b),
+  );
+  openIds = openIds.filter((id) => notes[id]);
+  if (activeId && (!notes[activeId] || !openIds.includes(activeId))) {
+    activeId = openIds.length > 0 ? openIds[openIds.length - 1] : null;
+  }
+  if (!activeId && openIds.length === 0 && ids.length > 0) {
+    openIds = [ids[0]];
+    activeId = ids[0];
+  }
+};
+
+const renderAll = (): void => {
+  left.hidden = !leftVisible;
+  updateCount();
+  renderTabs();
+  renderList();
+  renderViewer();
+};
+
+const showLoading = (): void => {
+  body.replaceChildren();
+  const wrap = el("div", "loading-wrap");
+  body.append(wrap);
+  track(mountSpinner(wrap, { label: "Loading notes" }));
+};
+
+const restoreBody = (): void => {
+  body.replaceChildren();
+  body.append(left, right);
+};
+
+const loadAll = async (initial: boolean): Promise<void> => {
+  loading = true;
+  loadError = null;
+  if (initial) showLoading();
+  try {
+    const [freshNotes, freshLastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
+    let freshTasks = new Map<string, ClickUpTask>();
+    try {
+      freshTasks = await loadTasks();
+    } catch {
+      if (initial) throw new Error("ClickUp rejected the token.");
+      // Keep old task titles on background refreshes.
+      freshTasks = tasks;
+    }
+    notes = freshNotes;
+    lastNoteAt = freshLastNoteAt;
+    tasks = freshTasks;
+    lastUpdated = await readUpdated();
+    if (initial) await loadUI();
+    reconcile();
+    if (initial) {
+      restoreBody();
+      initShellControls();
+    }
+    renderAll();
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : String(error);
+    if (initial) {
+      restoreBody();
+      body.replaceChildren();
+      track(mountEmpty(body, { title: "Could not load notes", body: loadError ?? "" }));
+    } else {
+      await host.toast({ kind: "error", message: loadError ?? "Could not load notes" });
+    }
   } finally {
-    refreshButton?.update({ loading: false, disabled: false });
+    loading = false;
+  }
+};
+
+/** Re-read local state when an external writer bumps `updated`. Skips while editing. */
+const pollLocal = async (): Promise<void> => {
+  if (document.visibilityState !== "visible" || loading || editorView) return;
+  const stamp = await readUpdated();
+  if (!stamp || stamp === lastUpdated) return;
+  lastUpdated = stamp;
+  try {
+    const [freshNotes, freshLastNoteAt] = await Promise.all([readNotes(), readLastNoteAt()]);
+    notes = freshNotes;
+    lastNoteAt = freshLastNoteAt;
+    reconcile();
+    renderAll();
+  } catch {
+    // Next poll retries.
   }
 };
 
@@ -388,12 +738,29 @@ refreshButton = mountButton(refreshHost, {
   label: "Refresh",
   variant: "secondary",
   size: "sm",
-  onClick: () => void render(),
+  onClick: () => void loadAll(false),
 });
 
 host.onReady((ctx) => {
   applyHostReady(ctx, document.documentElement);
-  settings = ctx.settings ?? {};
+  const next = ctx.settings ?? {};
+  const folderChanged = (next["frente-folder"] ?? "") !== (settings["frente-folder"] ?? "");
+  const fieldChanged = (next["sprint-field"] ?? "") !== (settings["sprint-field"] ?? "");
+  settings = next;
+  if ((folderChanged || fieldChanged) && !editorView) {
+    renderList();
+    renderViewer();
+  }
 });
 
-void render();
+host.onSettings((next) => {
+  settings = next ?? {};
+  if (!editorView) {
+    renderList();
+    renderViewer();
+  }
+});
+
+window.setInterval(() => void pollLocal(), 10_000);
+
+void loadAll(true);
