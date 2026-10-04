@@ -396,6 +396,13 @@ const persistNote = async (taskId: string): Promise<void> => {
   }
 };
 
+/** Force the next read to pick up changes made outside the panel (e.g. by a script). */
+const resetLocal = (): void => {
+  doneLoaded = false;
+  notesLoaded = false;
+  for (const taskId of Object.keys(notes)) delete notes[taskId];
+};
+
 const statusTone = (status: string, type: string | undefined): Tone => {
   const value = status.toLowerCase();
   if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -724,6 +731,7 @@ const load = async (force: boolean): Promise<void> => {
     if (force) {
       user = null;
       teamIds = [];
+      resetLocal();
     }
     await readDone();
     await readNotes();

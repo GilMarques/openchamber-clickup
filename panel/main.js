@@ -2159,6 +2159,11 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     } catch {
     }
   };
+  var resetLocal = () => {
+    doneLoaded = false;
+    notesLoaded = false;
+    for (const taskId of Object.keys(notes)) delete notes[taskId];
+  };
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
     if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -2460,6 +2465,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       if (force) {
         user = null;
         teamIds = [];
+        resetLocal();
       }
       await readDone();
       await readNotes();

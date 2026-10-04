@@ -117,6 +117,35 @@ ClickUp's MCP server is OAuth-only and rate-limited (50 calls/24h on Free, 300
 on Unlimited+ without the Everything AI add-on), which is why the panel uses the
 REST API rather than MCP for its reads.
 
+## Agent / script access
+
+The panel's local state is a plain JSON file on the OpenChamber server:
+
+```
+~/.config/openchamber/guest-storage/clickup-tasks.json
+{ "done": { "YYYY-MM-DD": ["<taskId>"] }, "note:<taskId>": "text" }
+```
+
+`scripts/state.mjs` edits it safely (atomic temp-file + rename, keeps other
+keys), so an agent or a shell script can drop notes and ticks in without
+hand-editing JSON:
+
+```bash
+node scripts/state.mjs list
+node scripts/state.mjs notes
+node scripts/state.mjs note-set <taskId> "some text"
+node scripts/state.mjs note-del <taskId>
+node scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
+node scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
+```
+
+After an external change, press **Refresh** in the panel (or reopen it). A forced
+refresh re-reads storage, so the change appears without touching ClickUp.
+
+The ClickUp token the extension connected is in
+`~/.config/openchamber/guest-auth.json`; scripts can call the ClickUp API with it
+without re-pasting.
+
 ## Develop
 
 Requires Node 22+ (this project was built on Node 24) and matches
