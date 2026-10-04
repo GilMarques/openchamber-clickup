@@ -2029,7 +2029,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     const row = el2("div", "cu-row");
     row.tabIndex = 0;
     row.setAttribute("role", "button");
-    row.title = `${shortId(task)} \u2014 ${task.name ?? ""}`;
     const main = el2("div", "cu-main");
     const title2 = el2("div", "cu-title");
     title2.textContent = task.name || "(untitled)";

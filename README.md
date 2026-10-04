@@ -21,8 +21,7 @@ install prompt has nothing to approve.
 - A **caret** on each task that has subtasks. Subtasks are **expanded by
   default**; click the caret (▾) to collapse them and (▸) to expand again.
   Deeper levels nest too. Click a row to attach that task to the chat. A task
-  without subtasks keeps the caret space empty so titles line up. The task id is
-  in the row's tooltip.
+  without subtasks keeps the caret space empty so titles line up.
 - A **Frentes filter row** under the Open/All tabs: `All` plus one tab per
   frente (with task counts). Pick a frente to show only its tasks; the tabs
   update with the Open/All and search filters.

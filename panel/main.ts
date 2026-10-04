@@ -345,7 +345,6 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
   const row = el("div", "cu-row");
   row.tabIndex = 0;
   row.setAttribute("role", "button");
-  row.title = `${shortId(task)} — ${task.name ?? ""}`;
   const main = el("div", "cu-main");
   const title = el("div", "cu-title");
   title.textContent = task.name || "(untitled)";
