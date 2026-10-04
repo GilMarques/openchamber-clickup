@@ -1911,10 +1911,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   var tools = el2("div", "tools");
   var searchHost = el2("div");
   var frenteRow = el2("div", "frente-row");
-  var frenteLabel = el2("span", "frente-label");
-  frenteLabel.textContent = "Frentes";
   var frenteTabsHost = el2("div", "frente-tabs");
-  frenteRow.append(frenteLabel, frenteTabsHost);
+  frenteRow.append(frenteTabsHost);
   frenteRow.hidden = true;
   tools.append(searchHost, frenteRow);
   var content = el2("div", "content");
