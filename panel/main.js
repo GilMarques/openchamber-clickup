@@ -1325,6 +1325,54 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     };
   };
 
+  // node_modules/@openchamber/sdk/dist/ui/field.js
+  var mountTextField = (root2, initial) => {
+    ensureStyle(UI_CSS);
+    let props = initial;
+    const field = el("label", "oc-sdk oc-sdk-field");
+    const caption = el("span", "oc-sdk-field-label");
+    const input = props.multiline ? el("textarea", "oc-sdk-input") : el("input", "oc-sdk-input");
+    const note = el("span", "oc-sdk-field-note");
+    field.append(caption, input, note);
+    root2.append(field);
+    const paint = () => {
+      setText(caption, props.label);
+      caption.hidden = !props.label;
+      if (input instanceof HTMLInputElement) {
+        input.type = props.password ? "password" : "text";
+      } else {
+        input.rows = props.rows ?? 3;
+      }
+      if (input.value !== props.value) {
+        input.value = props.value;
+      }
+      input.disabled = Boolean(props.disabled);
+      setAttr(input, "placeholder", props.placeholder);
+      input.dataset.mono = props.mono ? "true" : "false";
+      const invalid = Boolean(props.error);
+      field.dataset.invalid = invalid ? "true" : "false";
+      input.setAttribute("aria-invalid", invalid ? "true" : "false");
+      const text = props.error ?? props.helper ?? "";
+      setText(note, text);
+      note.hidden = text === "";
+    };
+    const onInput = () => {
+      props.onChange(input.value);
+    };
+    input.addEventListener("input", onInput);
+    paint();
+    return {
+      update: (next) => {
+        props = { ...props, ...next };
+        paint();
+      },
+      dispose: () => {
+        input.removeEventListener("input", onInput);
+        field.remove();
+      }
+    };
+  };
+
   // node_modules/@openchamber/sdk/dist/ui/icons.js
   var SVG_NS = "http://www.w3.org/2000/svg";
   var ICON_PATH = {
@@ -2077,6 +2125,32 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     } catch {
     }
   };
+  var notes = {};
+  var editingNote = /* @__PURE__ */ new Set();
+  var notesLoaded = false;
+  var readNotes = async () => {
+    if (notesLoaded) return;
+    notesLoaded = true;
+    try {
+      const keys = await host.storage.keys();
+      const noteKeys = keys.filter((key) => key.startsWith("note:"));
+      const values = await Promise.all(
+        noteKeys.map(async (key) => [key, await host.storage.get(key)])
+      );
+      for (const [key, value] of values) {
+        if (typeof value === "string" && value) notes[key.slice("note:".length)] = value;
+      }
+    } catch {
+    }
+  };
+  var persistNote = async (taskId) => {
+    try {
+      const value = notes[taskId];
+      if (value) await host.storage.set(`note:${taskId}`, value);
+      else await host.storage.delete(`note:${taskId}`);
+    } catch {
+    }
+  };
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
     if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -2105,6 +2179,89 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       })
     );
   };
+  var createNote = (task, depth) => {
+    const element = el2("div", "cu-note-wrap");
+    element.style.setProperty("--cu-indent", `${depth * 14}px`);
+    const paint = () => {
+      element.replaceChildren();
+      const value = notes[task.id] ?? "";
+      if (editingNote.has(task.id)) {
+        let draft = value;
+        const editor = el2("div", "cu-note-editor");
+        const fieldHost = el2("div");
+        editor.append(fieldHost);
+        active2.push(
+          mountTextField(fieldHost, {
+            value,
+            multiline: true,
+            rows: 3,
+            placeholder: "Local note (kept in OpenChamber, not in ClickUp)",
+            onChange: (next) => {
+              draft = next;
+            }
+          })
+        );
+        const actions = el2("div", "cu-note-actions");
+        active2.push(
+          mountButton(actions, {
+            label: "Save",
+            size: "xs",
+            onClick: () => {
+              const trimmed = draft.trim();
+              if (trimmed) notes[task.id] = trimmed;
+              else delete notes[task.id];
+              editingNote.delete(task.id);
+              void persistNote(task.id);
+              paint();
+            }
+          }),
+          mountButton(actions, {
+            label: "Cancel",
+            variant: "ghost",
+            size: "xs",
+            onClick: () => {
+              editingNote.delete(task.id);
+              paint();
+            }
+          })
+        );
+        if (value) {
+          active2.push(
+            mountButton(actions, {
+              label: "Delete",
+              variant: "destructive",
+              size: "xs",
+              onClick: () => {
+                delete notes[task.id];
+                editingNote.delete(task.id);
+                void persistNote(task.id);
+                paint();
+              }
+            })
+          );
+        }
+        editor.append(actions);
+        element.append(editor);
+        element.hidden = false;
+        return;
+      }
+      if (value) {
+        const display = el2("div", "cu-note");
+        display.textContent = value;
+        display.addEventListener("click", () => open());
+        element.append(display);
+        element.hidden = false;
+        return;
+      }
+      element.hidden = true;
+    };
+    const open = () => {
+      editingNote.add(task.id);
+      paint();
+    };
+    paint();
+    return { element, open };
+  };
   var makeDoneCheckbox = (task, row) => {
     const wrap = el2("span", "cu-check");
     wrap.addEventListener("click", (event) => event.stopPropagation());
@@ -2123,7 +2280,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     });
     active2.push(handle);
   };
-  var makeRow = (task, frente) => {
+  var makeRow = (task, frente, onNote) => {
     const row = el2("div", "cu-row");
     row.tabIndex = 0;
     row.setAttribute("role", "button");
@@ -2157,6 +2314,11 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       metaEl.textContent = due;
       row.append(metaEl);
     }
+    const noteHost = el2("span", "cu-note-btn");
+    noteHost.addEventListener("click", (event) => event.stopPropagation());
+    noteHost.addEventListener("keydown", (event) => event.stopPropagation());
+    row.append(noteHost);
+    active2.push(mountButton(noteHost, { label: "note", variant: "ghost", size: "xs", onClick: onNote }));
     makeDoneCheckbox(task, row);
     row.addEventListener("click", () => attachTask(task));
     row.addEventListener("keydown", (event) => {
@@ -2169,7 +2331,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   };
   var renderTree = (container, nodes, depth, frente) => {
     for (const node of nodes) {
-      const row = makeRow(node.task, frente);
+      const note = createNote(node.task, depth);
+      const row = makeRow(node.task, frente, note.open);
       row.style.setProperty("--cu-indent", `${depth * 14}px`);
       let childrenBox = null;
       if (node.children.length > 0) {
@@ -2196,6 +2359,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         row.prepend(el2("span", "cu-caret-spacer"));
       }
       container.append(row);
+      container.append(note.element);
       if (childrenBox) {
         renderTree(childrenBox, node.children, depth + 1, frente);
         container.append(childrenBox);
@@ -2283,6 +2447,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         teamIds = [];
       }
       await readDone();
+      await readNotes();
       await ensureContext();
       const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user.id), state.filter === "all");
       if (current !== generation) return;

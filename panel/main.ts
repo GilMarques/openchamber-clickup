@@ -15,6 +15,7 @@ import {
   mountSearchField,
   mountSpinner,
   mountTabs,
+  mountTextField,
 } from "@openchamber/sdk/ui";
 import type { ButtonHandle, CheckboxHandle, TabsHandle, Tone } from "@openchamber/sdk/ui";
 import {
@@ -350,6 +351,38 @@ const persistDone = async (): Promise<void> => {
   }
 };
 
+// Local notes, one storage key per task (`note:<id>`), never sent to ClickUp.
+const notes: Record<string, string> = {};
+const editingNote = new Set<string>();
+let notesLoaded = false;
+
+const readNotes = async (): Promise<void> => {
+  if (notesLoaded) return;
+  notesLoaded = true;
+  try {
+    const keys = await host.storage.keys();
+    const noteKeys = keys.filter((key) => key.startsWith("note:"));
+    const values = await Promise.all(
+      noteKeys.map(async (key) => [key, await host.storage.get(key)] as const),
+    );
+    for (const [key, value] of values) {
+      if (typeof value === "string" && value) notes[key.slice("note:".length)] = value;
+    }
+  } catch {
+    // Notes are local-only; start empty if storage is unavailable.
+  }
+};
+
+const persistNote = async (taskId: string): Promise<void> => {
+  try {
+    const value = notes[taskId];
+    if (value) await host.storage.set(`note:${taskId}`, value);
+    else await host.storage.delete(`note:${taskId}`);
+  } catch {
+    // Ignore; the note stays in memory for this session.
+  }
+};
+
 const statusTone = (status: string, type: string | undefined): Tone => {
   const value = status.toLowerCase();
   if (/refus|block|fail|cancel|reject/.test(value)) return "error";
@@ -384,6 +417,93 @@ const attachTask = (task: ClickUpTask): void => {
     );
 };
 
+type NoteController = { element: HTMLElement; open: () => void };
+
+/** The note block under a row: shows the note, or an editor when opened. */
+const createNote = (task: ClickUpTask, depth: number): NoteController => {
+  const element = el("div", "cu-note-wrap");
+  element.style.setProperty("--cu-indent", `${depth * 14}px`);
+  const paint = () => {
+    element.replaceChildren();
+    const value = notes[task.id] ?? "";
+    if (editingNote.has(task.id)) {
+      let draft = value;
+      const editor = el("div", "cu-note-editor");
+      const fieldHost = el("div");
+      editor.append(fieldHost);
+      active.push(
+        mountTextField(fieldHost, {
+          value,
+          multiline: true,
+          rows: 3,
+          placeholder: "Local note (kept in OpenChamber, not in ClickUp)",
+          onChange: (next) => {
+            draft = next;
+          },
+        }),
+      );
+      const actions = el("div", "cu-note-actions");
+      active.push(
+        mountButton(actions, {
+          label: "Save",
+          size: "xs",
+          onClick: () => {
+            const trimmed = draft.trim();
+            if (trimmed) notes[task.id] = trimmed;
+            else delete notes[task.id];
+            editingNote.delete(task.id);
+            void persistNote(task.id);
+            paint();
+          },
+        }),
+        mountButton(actions, {
+          label: "Cancel",
+          variant: "ghost",
+          size: "xs",
+          onClick: () => {
+            editingNote.delete(task.id);
+            paint();
+          },
+        }),
+      );
+      if (value) {
+        active.push(
+          mountButton(actions, {
+            label: "Delete",
+            variant: "destructive",
+            size: "xs",
+            onClick: () => {
+              delete notes[task.id];
+              editingNote.delete(task.id);
+              void persistNote(task.id);
+              paint();
+            },
+          }),
+        );
+      }
+      editor.append(actions);
+      element.append(editor);
+      element.hidden = false;
+      return;
+    }
+    if (value) {
+      const display = el("div", "cu-note");
+      display.textContent = value;
+      display.addEventListener("click", () => open());
+      element.append(display);
+      element.hidden = false;
+      return;
+    }
+    element.hidden = true;
+  };
+  const open = () => {
+    editingNote.add(task.id);
+    paint();
+  };
+  paint();
+  return { element, open };
+};
+
 const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
   const wrap = el("span", "cu-check");
   wrap.addEventListener("click", (event) => event.stopPropagation());
@@ -403,7 +523,7 @@ const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
   active.push(handle);
 };
 
-const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
+const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLElement => {
   const row = el("div", "cu-row");
   row.tabIndex = 0;
   row.setAttribute("role", "button");
@@ -437,6 +557,11 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
     metaEl.textContent = due;
     row.append(metaEl);
   }
+  const noteHost = el("span", "cu-note-btn");
+  noteHost.addEventListener("click", (event) => event.stopPropagation());
+  noteHost.addEventListener("keydown", (event) => event.stopPropagation());
+  row.append(noteHost);
+  active.push(mountButton(noteHost, { label: "note", variant: "ghost", size: "xs", onClick: onNote }));
   makeDoneCheckbox(task, row);
   row.addEventListener("click", () => attachTask(task));
   row.addEventListener("keydown", (event) => {
@@ -450,7 +575,8 @@ const makeRow = (task: ClickUpTask, frente: string): HTMLElement => {
 
 const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, frente: string): void => {
   for (const node of nodes) {
-    const row = makeRow(node.task, frente);
+    const note = createNote(node.task, depth);
+    const row = makeRow(node.task, frente, note.open);
     row.style.setProperty("--cu-indent", `${depth * 14}px`);
     let childrenBox: HTMLElement | null = null;
     if (node.children.length > 0) {
@@ -477,6 +603,7 @@ const renderTree = (container: HTMLElement, nodes: TreeNode[], depth: number, fr
       row.prepend(el("span", "cu-caret-spacer"));
     }
     container.append(row);
+    container.append(note.element);
     if (childrenBox) {
       renderTree(childrenBox, node.children, depth + 1, frente);
       container.append(childrenBox);
@@ -574,6 +701,7 @@ const load = async (force: boolean): Promise<void> => {
       teamIds = [];
     }
     await readDone();
+    await readNotes();
     await ensureContext();
     const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user!.id), state.filter === "all");
     if (current !== generation) return;

@@ -30,6 +30,10 @@ install prompt has nothing to approve.
   and **does not change anything in ClickUp**. Checked rows get a struck-through
   title. Ticks are per calendar day in your local time; the last 60 days are
   kept, so a new day starts unticked.
+- A **local note** on each task: click **note** on a row to write one. Notes live
+  in the extension's own storage (key `note:<taskId>`) and are **never sent to
+  ClickUp**, so pasted AI text stays out of your workspace. A saved note shows
+  under the row and opens again when you click it; use Delete to remove it.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible
