@@ -22,9 +22,10 @@ install prompt has nothing to approve.
   default**; click the caret (▾) to collapse them and (▸) to expand again.
   Deeper levels nest too. Click a row to attach that task to the chat. A task
   without subtasks keeps the caret space empty so titles line up.
-- A **Frentes filter row** under the Open/All tabs: `All` plus one tab per
-  frente (with task counts). Pick a frente to show only its tasks; the tabs
-  update with the Open/All and search filters.
+- **Open / All** tabs in the header next to a refresh icon. A **Frentes filter
+  row** sits under the search field: `All` plus one tab per frente (with task
+  counts). Pick a frente to show only its tasks; the tabs update with the
+  Open/All and search filters.
 - A **local checkbox** on each row to tick off what you did that day. It is
   stored on the OpenChamber server in the extension's own storage (key `done`)
   and **does not change anything in ClickUp**. Checked rows get a struck-through

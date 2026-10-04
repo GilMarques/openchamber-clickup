@@ -17,7 +17,7 @@ import {
   mountTabs,
   mountTextField,
 } from "@openchamber/sdk/ui";
-import type { ButtonHandle, CheckboxHandle, TabsHandle, Tone } from "@openchamber/sdk/ui";
+import type { TabsHandle, Tone } from "@openchamber/sdk/ui";
 import {
   buildGroups,
   buildTree,
@@ -88,28 +88,47 @@ const bar = el("div", "bar");
 const title = el("div", "title");
 title.textContent = "ClickUp Tasks";
 bar.append(title);
-const spacer = el("div");
-spacer.style.flex = "1";
+const spacer = el("div", "bar-spacer");
 bar.append(spacer);
-const refreshHost = el("div");
-bar.append(refreshHost);
+const tabsHost = el("div", "bar-tabs");
+const refreshHost = el("div", "bar-actions");
+bar.append(tabsHost, refreshHost);
 
 const tools = el("div", "tools");
 const searchHost = el("div");
-const tabsHost = el("div");
 const frenteRow = el("div", "frente-row");
 const frenteLabel = el("span", "frente-label");
 frenteLabel.textContent = "Frentes";
 const frenteTabsHost = el("div", "frente-tabs");
 frenteRow.append(frenteLabel, frenteTabsHost);
 frenteRow.hidden = true;
-tools.append(searchHost, tabsHost, frenteRow);
+tools.append(searchHost, frenteRow);
 const content = el("div", "content");
 root.append(bar, tools, content);
 
-let refreshButton: ButtonHandle | null = null;
+const REFRESH_ICON = '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>';
+
+const createIconButton = (label: string, icon: string, onClick: () => void): HTMLButtonElement => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "cu-icon-btn";
+  button.setAttribute("aria-label", label);
+  button.innerHTML =
+    `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
+    `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg>`;
+  button.addEventListener("click", onClick);
+  return button;
+};
+
+let refreshButton: HTMLButtonElement | null = null;
 let frenteTabs: TabsHandle | null = null;
 let active: Array<{ dispose: () => void }> = [];
+
+const setRefreshLoading = (loading: boolean): void => {
+  if (!refreshButton) return;
+  refreshButton.disabled = loading;
+  refreshButton.dataset.loading = loading ? "true" : "false";
+};
 
 const clearContent = () => {
   for (const handle of active) handle.dispose();
@@ -152,12 +171,8 @@ frenteTabs = mountTabs(frenteTabsHost, {
   },
 });
 
-refreshButton = mountButton(refreshHost, {
-  label: "Refresh",
-  variant: "secondary",
-  size: "sm",
-  onClick: () => void load(true),
-});
+refreshButton = createIconButton("Refresh", REFRESH_ICON, () => void load(true));
+refreshHost.append(refreshButton);
 
 // --- ClickUp calls through the host (token never reaches this page) --------
 
@@ -509,15 +524,8 @@ const syncNoteButton = (taskId: string): void => {
 };
 
 const makeNoteButton = (task: ClickUpTask, onNote: () => void): HTMLButtonElement => {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "cu-icon-btn";
-  button.setAttribute("aria-label", "Add or edit note");
+  const button = createIconButton("Add or edit note", NOTE_ICON, onNote);
   button.dataset.has = notes[task.id] ? "true" : "false";
-  button.innerHTML =
-    `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" ` +
-    `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICON}</svg>`;
-  button.addEventListener("click", onNote);
   noteButtonByTask.set(task.id, button);
   return button;
 };
@@ -712,7 +720,7 @@ const load = async (force: boolean): Promise<void> => {
   }
   const current = ++generation;
   state.status = { kind: "loading" };
-  refreshButton?.update({ loading: true, disabled: true });
+  setRefreshLoading(true);
   renderContent();
   try {
     if (force) {
@@ -740,7 +748,7 @@ const load = async (force: boolean): Promise<void> => {
     }
   } finally {
     if (current === generation) {
-      refreshButton?.update({ loading: false, disabled: false });
+      setRefreshLoading(false);
       renderContent();
     }
   }

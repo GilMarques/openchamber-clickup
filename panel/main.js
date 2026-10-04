@@ -1903,26 +1903,40 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   var title = el2("div", "title");
   title.textContent = "ClickUp Tasks";
   bar.append(title);
-  var spacer = el2("div");
-  spacer.style.flex = "1";
+  var spacer = el2("div", "bar-spacer");
   bar.append(spacer);
-  var refreshHost = el2("div");
-  bar.append(refreshHost);
+  var tabsHost = el2("div", "bar-tabs");
+  var refreshHost = el2("div", "bar-actions");
+  bar.append(tabsHost, refreshHost);
   var tools = el2("div", "tools");
   var searchHost = el2("div");
-  var tabsHost = el2("div");
   var frenteRow = el2("div", "frente-row");
   var frenteLabel = el2("span", "frente-label");
   frenteLabel.textContent = "Frentes";
   var frenteTabsHost = el2("div", "frente-tabs");
   frenteRow.append(frenteLabel, frenteTabsHost);
   frenteRow.hidden = true;
-  tools.append(searchHost, tabsHost, frenteRow);
+  tools.append(searchHost, frenteRow);
   var content = el2("div", "content");
   root.append(bar, tools, content);
+  var REFRESH_ICON = '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>';
+  var createIconButton = (label, icon2, onClick) => {
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "cu-icon-btn";
+    button2.setAttribute("aria-label", label);
+    button2.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon2}</svg>`;
+    button2.addEventListener("click", onClick);
+    return button2;
+  };
   var refreshButton = null;
   var frenteTabs = null;
   var active2 = [];
+  var setRefreshLoading = (loading) => {
+    if (!refreshButton) return;
+    refreshButton.disabled = loading;
+    refreshButton.dataset.loading = loading ? "true" : "false";
+  };
   var clearContent = () => {
     for (const handle of active2) handle.dispose();
     active2 = [];
@@ -1960,12 +1974,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       renderContent();
     }
   });
-  refreshButton = mountButton(refreshHost, {
-    label: "Refresh",
-    variant: "secondary",
-    size: "sm",
-    onClick: () => void load(true)
-  });
+  refreshButton = createIconButton("Refresh", REFRESH_ICON, () => void load(true));
+  refreshHost.append(refreshButton);
   var callClickUp = (path, query) => host.request({ method: "GET", path, query });
   var requestJson = async (path, query) => {
     const result = await callClickUp(path, query);
@@ -2263,13 +2273,8 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     if (button2) button2.dataset.has = notes[taskId] ? "true" : "false";
   };
   var makeNoteButton = (task, onNote) => {
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "cu-icon-btn";
-    button2.setAttribute("aria-label", "Add or edit note");
+    const button2 = createIconButton("Add or edit note", NOTE_ICON, onNote);
     button2.dataset.has = notes[task.id] ? "true" : "false";
-    button2.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NOTE_ICON}</svg>`;
-    button2.addEventListener("click", onNote);
     noteButtonByTask.set(task.id, button2);
     return button2;
   };
@@ -2451,7 +2456,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     }
     const current = ++generation;
     state.status = { kind: "loading" };
-    refreshButton?.update({ loading: true, disabled: true });
+    setRefreshLoading(true);
     renderContent();
     try {
       if (force) {
@@ -2479,7 +2484,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       }
     } finally {
       if (current === generation) {
-        refreshButton?.update({ loading: false, disabled: false });
+        setRefreshLoading(false);
         renderContent();
       }
     }

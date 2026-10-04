@@ -21,9 +21,21 @@
         gap: 8px;
         padding: 10px 12px 8px;
       }
+      .bar-spacer {
+        flex: 1 1 auto;
+      }
+      .bar-tabs,
+      .bar-actions {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+      }
       .title {
         font-weight: 600;
         font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .tools {
         display: flex;
@@ -256,6 +268,18 @@
       }
       .cu-icon-btn[data-has="true"] svg {
         fill: currentColor;
+      }
+      .cu-icon-btn[data-loading="true"] svg {
+        animation: cu-spin 0.9s linear infinite;
+      }
+      .cu-icon-btn:disabled {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+      @keyframes cu-spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
       .cu-note-wrap {
         padding: 0 8px 6px calc(32px + var(--cu-indent, 0px));
