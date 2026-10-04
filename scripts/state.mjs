@@ -37,6 +37,7 @@ const read = () => {
 };
 
 const write = (data) => {
+  data.updated = String(Date.now());
   const tmp = `${file}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(data), { mode: 0o600 });
   renameSync(tmp, file);

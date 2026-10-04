@@ -336,6 +336,27 @@ let doneByDate: Record<string, string[]> = {};
 let doneToday = new Set<string>();
 let todayKey = localDateKey();
 let doneLoaded = false;
+let lastUpdated: string | null = null;
+
+const readUpdated = async (): Promise<string | null> => {
+  try {
+    const value = await host.storage.get("updated");
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+/** Bump the marker external writers set, and the panel polls. */
+const touchUpdated = async (): Promise<void> => {
+  const stamp = String(Date.now());
+  lastUpdated = stamp;
+  try {
+    await host.storage.set("updated", stamp);
+  } catch {
+    // Ignore; polling simply will not see this particular write.
+  }
+};
 
 const readDone = async (): Promise<void> => {
   if (!doneLoaded) {
@@ -362,6 +383,7 @@ const persistDone = async (): Promise<void> => {
   } catch {
     // Local-only tracking; a failed write is not worth interrupting the panel.
   }
+  await touchUpdated();
 };
 
 // Local notes, one storage key per task (`note:<id>`), never sent to ClickUp.
@@ -394,6 +416,7 @@ const persistNote = async (taskId: string): Promise<void> => {
   } catch {
     // Ignore; the note stays in memory for this session.
   }
+  await touchUpdated();
 };
 
 /** Force the next read to pick up changes made outside the panel (e.g. by a script). */
@@ -401,6 +424,26 @@ const resetLocal = (): void => {
   doneLoaded = false;
   notesLoaded = false;
   for (const taskId of Object.keys(notes)) delete notes[taskId];
+};
+
+/** Re-read local state when an external writer (script or MCP) bumps `updated`. */
+const pollLocal = async (): Promise<void> => {
+  if (document.visibilityState !== "visible") return;
+  const stamp = await readUpdated();
+  if (!stamp || stamp === lastUpdated) return;
+  lastUpdated = stamp;
+  resetLocal();
+  await readDone();
+  await readNotes();
+  if (state.connected && state.status.kind === "idle") {
+    const top = content.scrollTop;
+    renderContent();
+    content.scrollTop = top;
+  }
+};
+
+const startLocalPolling = (): void => {
+  window.setInterval(() => void pollLocal(), 10_000);
 };
 
 const statusTone = (status: string, type: string | undefined): Tone => {
@@ -735,6 +778,7 @@ const load = async (force: boolean): Promise<void> => {
     }
     await readDone();
     await readNotes();
+    lastUpdated = await readUpdated();
     await ensureContext();
     const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user!.id), state.filter === "all");
     if (current !== generation) return;
@@ -800,3 +844,4 @@ host.onSettings((settings) => {
 });
 
 renderContent();
+startLocalPolling();

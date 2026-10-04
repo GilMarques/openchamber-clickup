@@ -2109,6 +2109,23 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   var doneToday = /* @__PURE__ */ new Set();
   var todayKey = localDateKey();
   var doneLoaded = false;
+  var lastUpdated = null;
+  var readUpdated = async () => {
+    try {
+      const value = await host.storage.get("updated");
+      return typeof value === "string" ? value : null;
+    } catch {
+      return null;
+    }
+  };
+  var touchUpdated = async () => {
+    const stamp = String(Date.now());
+    lastUpdated = stamp;
+    try {
+      await host.storage.set("updated", stamp);
+    } catch {
+    }
+  };
   var readDone = async () => {
     if (!doneLoaded) {
       try {
@@ -2132,6 +2149,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       await host.storage.set("done", doneByDate);
     } catch {
     }
+    await touchUpdated();
   };
   var notes = {};
   var editingNote = /* @__PURE__ */ new Set();
@@ -2158,11 +2176,29 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       else await host.storage.delete(`note:${taskId}`);
     } catch {
     }
+    await touchUpdated();
   };
   var resetLocal = () => {
     doneLoaded = false;
     notesLoaded = false;
     for (const taskId of Object.keys(notes)) delete notes[taskId];
+  };
+  var pollLocal = async () => {
+    if (document.visibilityState !== "visible") return;
+    const stamp = await readUpdated();
+    if (!stamp || stamp === lastUpdated) return;
+    lastUpdated = stamp;
+    resetLocal();
+    await readDone();
+    await readNotes();
+    if (state.connected && state.status.kind === "idle") {
+      const top = content.scrollTop;
+      renderContent();
+      content.scrollTop = top;
+    }
+  };
+  var startLocalPolling = () => {
+    window.setInterval(() => void pollLocal(), 1e4);
   };
   var statusTone = (status, type) => {
     const value = status.toLowerCase();
@@ -2469,6 +2505,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       }
       await readDone();
       await readNotes();
+      lastUpdated = await readUpdated();
       await ensureContext();
       const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user.id), state.filter === "all");
       if (current !== generation) return;
@@ -2524,4 +2561,5 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     if (changed && state.connected) void load(true);
   });
   renderContent();
+  startLocalPolling();
 })();

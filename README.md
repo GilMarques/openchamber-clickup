@@ -123,12 +123,44 @@ The panel's local state is a plain JSON file on the OpenChamber server:
 
 ```
 ~/.config/openchamber/guest-storage/clickup-tasks.json
-{ "done": { "YYYY-MM-DD": ["<taskId>"] }, "note:<taskId>": "text" }
+{ "done": { "YYYY-MM-DD": ["<taskId>"] },
+  "note:<taskId>": "text",
+  "updated": "<epoch ms>" }
 ```
 
-`scripts/state.mjs` edits it safely (atomic temp-file + rename, keeps other
-keys), so an agent or a shell script can drop notes and ticks in without
-hand-editing JSON:
+### MCP server (`mcp/server.mjs`)
+
+A local MCP server exposes the extension to an agent with typed tools:
+
+| Tool | Does |
+| --- | --- |
+| `tasks_list` | Compact assigned tasks (`includeClosed`, `limit`) |
+| `task_get` | One task by id / custom id |
+| `notes_list` / `note_get` | Read local notes |
+| `note_set` / `note_delete` | Write/remove a local note |
+| `done_list` | Task ids ticked on a date (default today) |
+| `done_add` / `done_remove` | Tick / untick a task for a date |
+
+Add it to OpenCode/OpenChamber (this repo already added it to
+`~/.config/opencode/opencode.json`):
+
+```json
+"mcp": {
+  "clickup": {
+    "type": "local",
+    "command": ["node", "/home/gil/clickup-tasks/mcp/server.mjs"],
+    "enabled": true
+  }
+}
+```
+
+Restart OpenChamber/OpenCode after changing the server file so the MCP process
+is respawned.
+
+### CLI
+
+`scripts/state.mjs` edits the same file safely (atomic temp-file + rename, keeps
+other keys):
 
 ```bash
 node scripts/state.mjs list
@@ -139,12 +171,22 @@ node scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
 node scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
 ```
 
-After an external change, press **Refresh** in the panel (or reopen it). A forced
-refresh re-reads storage, so the change appears without touching ClickUp.
+### Live updates
+
+The panel polls the `updated` marker every 10 seconds while it is visible, and a
+forced refresh (the refresh icon) re-reads storage. Every writer — the panel,
+`scripts/state.mjs`, and the MCP server — bumps `updated`, so an agent change
+appears in the panel within ~10s without touching ClickUp. Write atomically, or
+the panel's own write can interleave.
 
 The ClickUp token the extension connected is in
 `~/.config/openchamber/guest-auth.json`; scripts can call the ClickUp API with it
-without re-pasting.
+without re-pasting. Prefer local notes/ticks so AI text never lands in ClickUp.
+
+### Skill
+
+`skills/clickup-tasks/SKILL.md` documents this contract for agent sessions; it is
+symlinked into `~/.config/opencode/skills/clickup-tasks`.
 
 ## Develop
 
