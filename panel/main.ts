@@ -371,7 +371,10 @@ const readDone = async (): Promise<void> => {
   doneToday = new Set(doneByDate[todayKey] ?? []);
 };
 
-const persistDone = async (): Promise<void> => {
+const persistDone = async (
+  action: "done-add" | "done-remove",
+  taskId: string,
+): Promise<void> => {
   doneByDate[todayKey] = [...doneToday];
   const kept: Record<string, string[]> = {};
   for (const date of Object.keys(doneByDate).sort().reverse().slice(0, 60)) {
@@ -383,7 +386,7 @@ const persistDone = async (): Promise<void> => {
   } catch {
     // Local-only tracking; a failed write is not worth interrupting the panel.
   }
-  await touchUpdated();
+  await pushEvent(action, taskId);
 };
 
 // Local notes, one storage key per task (`note:<id>`), never sent to ClickUp.
@@ -408,13 +411,59 @@ const readNotes = async (): Promise<void> => {
   }
 };
 
-const persistNote = async (taskId: string): Promise<void> => {
+const persistNote = async (taskId: string, action: "note-set" | "note-delete"): Promise<void> => {
   try {
     const value = notes[taskId];
     if (value) await host.storage.set(`note:${taskId}`, value);
     else await host.storage.delete(`note:${taskId}`);
   } catch {
     // Ignore; the note stays in memory for this session.
+  }
+  await pushEvent(action, taskId);
+};
+
+// Append-only history with timestamps. Stored only; nothing shows it in the UI.
+const EVENTS_MAX = 500;
+type LocalEvent = { at: string; type: string; taskId: string; date?: string };
+const events: LocalEvent[] = [];
+let eventsLoaded = false;
+
+const readEvents = async (): Promise<void> => {
+  if (eventsLoaded) return;
+  eventsLoaded = true;
+  try {
+    const value = await host.storage.get("events");
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (
+          entry &&
+          typeof entry === "object" &&
+          typeof (entry as LocalEvent).at === "string" &&
+          typeof (entry as LocalEvent).taskId === "string"
+        ) {
+          const record = entry as LocalEvent;
+          events.push({
+            at: record.at,
+            type: String(record.type ?? ""),
+            taskId: record.taskId,
+            date: typeof record.date === "string" ? record.date : undefined,
+          });
+        }
+      }
+    }
+  } catch {
+    // History is best-effort.
+  }
+  if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
+};
+
+const pushEvent = async (type: string, taskId: string, date?: string): Promise<void> => {
+  events.push({ at: new Date().toISOString(), type, taskId, ...(date ? { date } : {}) });
+  if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
+  try {
+    await host.storage.set("events", events);
+  } catch {
+    // Best-effort; the state change itself already succeeded.
   }
   await touchUpdated();
 };
@@ -423,7 +472,9 @@ const persistNote = async (taskId: string): Promise<void> => {
 const resetLocal = (): void => {
   doneLoaded = false;
   notesLoaded = false;
+  eventsLoaded = false;
   for (const taskId of Object.keys(notes)) delete notes[taskId];
+  events.length = 0;
 };
 
 /** Re-read local state when an external writer (script or MCP) bumps `updated`. */
@@ -516,7 +567,7 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
             else delete notes[task.id];
             editingNote.delete(task.id);
             syncNoteButton(task.id);
-            void persistNote(task.id);
+            void persistNote(task.id, "note-set");
             paint();
           },
         }),
@@ -540,7 +591,7 @@ const createNote = (task: ClickUpTask, depth: number): NoteController => {
               delete notes[task.id];
               editingNote.delete(task.id);
               syncNoteButton(task.id);
-              void persistNote(task.id);
+              void persistNote(task.id, "note-delete");
               paint();
             },
           }),
@@ -592,7 +643,7 @@ const makeDoneCheckbox = (task: ClickUpTask, row: HTMLElement): void => {
       else doneToday.delete(task.id);
       row.classList.toggle("cu-done", checked);
       handle.update({ checked });
-      void persistDone();
+      void persistDone(checked ? "done-add" : "done-remove", task.id);
     },
   });
   active.push(handle);
@@ -778,6 +829,7 @@ const load = async (force: boolean): Promise<void> => {
     }
     await readDone();
     await readNotes();
+    await readEvents();
     lastUpdated = await readUpdated();
     await ensureContext();
     const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user!.id), state.filter === "all");

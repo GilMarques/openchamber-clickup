@@ -125,8 +125,14 @@ The panel's local state is a plain JSON file on the OpenChamber server:
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
   "note:<taskId>": "text",
+  "events": [ { "at": "ISO", "type": "done-add", "taskId": "…", "date": "YYYY-MM-DD" } ],
   "updated": "<epoch ms>" }
 ```
+
+Every write records a timestamped event — `done-add`, `done-remove`, `note-set`,
+`note-delete` — in the `events` array (last 500 kept). Nothing renders it; it is
+storage only, so you can tell when a task was ticked or a note saved. Query it
+with the MCP `events_list` tool, the CLI, or by reading the file.
 
 ### MCP server (`mcp/server.mjs`)
 
@@ -140,6 +146,7 @@ A local MCP server exposes the extension to an agent with typed tools:
 | `note_set` / `note_delete` | Write/remove a local note |
 | `done_list` | Task ids ticked on a date (default today) |
 | `done_add` / `done_remove` | Tick / untick a task for a date |
+| `events_list` | Timestamped history of note and done changes |
 
 Add it to OpenCode/OpenChamber (this repo already added it to
 `~/.config/opencode/opencode.json`):
@@ -169,6 +176,7 @@ node scripts/state.mjs note-set <taskId> "some text"
 node scripts/state.mjs note-del <taskId>
 node scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
 node scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
+node scripts/state.mjs events [taskId]
 ```
 
 ### Live updates

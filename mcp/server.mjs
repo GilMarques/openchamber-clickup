@@ -45,6 +45,13 @@ const today = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
+const EVENTS_MAX = 500;
+const pushEvent = (data, type, taskId, date) => {
+  const events = Array.isArray(data.events) ? data.events : [];
+  events.push({ at: new Date().toISOString(), type, taskId, ...(date ? { date } : {}) });
+  data.events = events.slice(-EVENTS_MAX);
+};
+
 const token = () => {
   if (process.env.CLICKUP_TOKEN) return process.env.CLICKUP_TOKEN.trim();
   try {
@@ -191,6 +198,19 @@ const tools = [
       required: ["taskId"],
     },
   },
+  {
+    name: "events_list",
+    description:
+      "Timestamped history of local note and done changes (newest last). Optionally filter by taskId or type (note-set, note-delete, done-add, done-remove).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string" },
+        type: { type: "string" },
+        limit: { type: "number", description: "Max events to return (default 50, newest first)" },
+      },
+    },
+  },
 ];
 
 const callTool = async (name, args = {}) => {
@@ -248,6 +268,7 @@ const callTool = async (name, args = {}) => {
       if (!taskId || !text) throw new Error("taskId and text are required");
       const data = readState();
       data[`note:${taskId}`] = text;
+      pushEvent(data, "note-set", taskId);
       touch(data);
       writeState(data);
       return { taskId, text, saved: true };
@@ -257,6 +278,7 @@ const callTool = async (name, args = {}) => {
       if (!taskId) throw new Error("taskId is required");
       const data = readState();
       delete data[`note:${taskId}`];
+      pushEvent(data, "note-delete", taskId);
       touch(data);
       writeState(data);
       return { taskId, deleted: true };
@@ -278,9 +300,20 @@ const callTool = async (name, args = {}) => {
       else set.delete(taskId);
       done[date] = [...set];
       data.done = done;
+      pushEvent(data, name === "done_add" ? "done-add" : "done-remove", taskId, date);
       touch(data);
       writeState(data);
       return { date, taskId, checked: name === "done_add" };
+    }
+    case "events_list": {
+      const data = readState();
+      const all = Array.isArray(data.events) ? data.events : [];
+      const limit = Number.isFinite(args.limit) ? Math.max(1, Number(args.limit)) : 50;
+      const filtered = all.filter(
+        (event) =>
+          (!args.taskId || event?.taskId === args.taskId) && (!args.type || event?.type === args.type),
+      );
+      return { events: filtered.slice(-limit) };
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

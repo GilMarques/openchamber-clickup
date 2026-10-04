@@ -22,6 +22,7 @@ Registered as a local MCP server (`mcp/server.mjs`). Tools:
 | `note_get` / `note_set` / `note_delete` | Local note for one task |
 | `done_list` | Task ids ticked on a date (default today) |
 | `done_add` / `done_remove` | Tick / untick a task for a date |
+| `events_list` | Timestamped history of note/done changes (`taskId`, `type`, `limit`) |
 
 If the tools are not loaded (session started before the server was added),
 restart OpenChamber/OpenCode or fall back to the CLI.
@@ -35,6 +36,7 @@ node /home/gil/clickup-tasks/scripts/state.mjs note-del <taskId>
 node /home/gil/clickup-tasks/scripts/state.mjs done-add <taskId> [YYYY-MM-DD]
 node /home/gil/clickup-tasks/scripts/state.mjs done-remove <taskId> [YYYY-MM-DD]
 node /home/gil/clickup-tasks/scripts/state.mjs done-list [YYYY-MM-DD]
+node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
 ```
 
 ## Storage contract
@@ -43,11 +45,16 @@ node /home/gil/clickup-tasks/scripts/state.mjs done-list [YYYY-MM-DD]
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
   "note:<taskId>": "text",
+  "events": [ { "at": "2026-10-04T21:44:03.604Z", "type": "done-add", "taskId": "…", "date": "2026-10-04" } ],
   "updated": "<epoch ms>" }
 ```
 
 - `note:<taskId>` is one key per task; text is plain (may contain newlines).
 - `done` keeps the last 60 days, one entry per date.
+- `events` is an append-only timestamped history of every note/done change
+  (`done-add`, `done-remove`, `note-set`, `note-delete`), newest last, capped at
+  500. It is storage only — the panel does not render it. Use it to answer "when
+  did I tick this / save that note?".
 - `updated` is the change marker the panel polls every 10s. **Bump it**
   (`String(Date.now())`) whenever you write, or the panel will not re-read.
   `scripts/state.mjs` and the MCP server do this for you.

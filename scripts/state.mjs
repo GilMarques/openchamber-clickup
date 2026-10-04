@@ -49,10 +49,17 @@ const today = () => {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 };
 
+const EVENTS_MAX = 500;
+const pushEvent = (data, type, taskId, date) => {
+  const events = Array.isArray(data.events) ? data.events : [];
+  events.push({ at: new Date().toISOString(), type, taskId, ...(date ? { date } : {}) });
+  data.events = events.slice(-EVENTS_MAX);
+};
+
 const usage = () => {
   console.error(
     "usage: state.mjs list | notes | note-set <id> <text...> | note-del <id> | " +
-      "done-list [date] | done-add <id> [date] | done-remove <id> [date]",
+      "done-list [date] | done-add <id> [date] | done-remove <id> [date] | events [taskId]",
   );
   process.exit(2);
 };
@@ -78,6 +85,7 @@ switch (command) {
     const text = rest.join(" ").trim();
     if (!id || !text) usage();
     data[`note:${id}`] = text;
+    pushEvent(data, "note-set", id);
     write(data);
     console.log(`note set on ${id}`);
     break;
@@ -86,6 +94,7 @@ switch (command) {
     const [id] = args;
     if (!id) usage();
     delete data[`note:${id}`];
+    pushEvent(data, "note-delete", id);
     write(data);
     console.log(`note removed from ${id}`);
     break;
@@ -106,8 +115,17 @@ switch (command) {
     else set.delete(id);
     done[date] = [...set];
     data.done = done;
+    pushEvent(data, command, id, date);
     write(data);
     console.log(`${command === "done-add" ? "checked" : "unchecked"} ${id} on ${date}`);
+    break;
+  }
+  case "events": {
+    const [taskId] = args;
+    for (const event of Array.isArray(data.events) ? data.events : []) {
+      if (taskId && event?.taskId !== taskId) continue;
+      console.log(`${event.at}\t${event.type}\t${event.taskId}${event.date ? `\t${event.date}` : ""}`);
+    }
     break;
   }
   default:

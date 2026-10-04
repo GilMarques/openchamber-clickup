@@ -2138,7 +2138,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     todayKey = localDateKey();
     doneToday = new Set(doneByDate[todayKey] ?? []);
   };
-  var persistDone = async () => {
+  var persistDone = async (action, taskId) => {
     doneByDate[todayKey] = [...doneToday];
     const kept = {};
     for (const date of Object.keys(doneByDate).sort().reverse().slice(0, 60)) {
@@ -2149,7 +2149,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       await host.storage.set("done", doneByDate);
     } catch {
     }
-    await touchUpdated();
+    await pushEvent(action, taskId);
   };
   var notes = {};
   var editingNote = /* @__PURE__ */ new Set();
@@ -2169,11 +2169,45 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     } catch {
     }
   };
-  var persistNote = async (taskId) => {
+  var persistNote = async (taskId, action) => {
     try {
       const value = notes[taskId];
       if (value) await host.storage.set(`note:${taskId}`, value);
       else await host.storage.delete(`note:${taskId}`);
+    } catch {
+    }
+    await pushEvent(action, taskId);
+  };
+  var EVENTS_MAX = 500;
+  var events = [];
+  var eventsLoaded = false;
+  var readEvents = async () => {
+    if (eventsLoaded) return;
+    eventsLoaded = true;
+    try {
+      const value = await host.storage.get("events");
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (entry && typeof entry === "object" && typeof entry.at === "string" && typeof entry.taskId === "string") {
+            const record = entry;
+            events.push({
+              at: record.at,
+              type: String(record.type ?? ""),
+              taskId: record.taskId,
+              date: typeof record.date === "string" ? record.date : void 0
+            });
+          }
+        }
+      }
+    } catch {
+    }
+    if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
+  };
+  var pushEvent = async (type, taskId, date) => {
+    events.push({ at: (/* @__PURE__ */ new Date()).toISOString(), type, taskId, ...date ? { date } : {} });
+    if (events.length > EVENTS_MAX) events.splice(0, events.length - EVENTS_MAX);
+    try {
+      await host.storage.set("events", events);
     } catch {
     }
     await touchUpdated();
@@ -2181,7 +2215,9 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
   var resetLocal = () => {
     doneLoaded = false;
     notesLoaded = false;
+    eventsLoaded = false;
     for (const taskId of Object.keys(notes)) delete notes[taskId];
+    events.length = 0;
   };
   var pollLocal = async () => {
     if (document.visibilityState !== "visible") return;
@@ -2261,7 +2297,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
               else delete notes[task.id];
               editingNote.delete(task.id);
               syncNoteButton(task.id);
-              void persistNote(task.id);
+              void persistNote(task.id, "note-set");
               paint();
             }
           }),
@@ -2285,7 +2321,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
                 delete notes[task.id];
                 editingNote.delete(task.id);
                 syncNoteButton(task.id);
-                void persistNote(task.id);
+                void persistNote(task.id, "note-delete");
                 paint();
               }
             })
@@ -2331,7 +2367,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
         else doneToday.delete(task.id);
         row.classList.toggle("cu-done", checked);
         handle.update({ checked });
-        void persistDone();
+        void persistDone(checked ? "done-add" : "done-remove", task.id);
       }
     });
     active2.push(handle);
@@ -2505,6 +2541,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
       }
       await readDone();
       await readNotes();
+      await readEvents();
       lastUpdated = await readUpdated();
       await ensureContext();
       const tasks = await fetchAssignedTasks(callClickUp, teamIds, String(user.id), state.filter === "all");
