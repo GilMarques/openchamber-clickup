@@ -542,6 +542,7 @@ const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLEle
   const row = el("div", "cu-row");
   row.tabIndex = 0;
   row.setAttribute("role", "button");
+  makeDoneCheckbox(task, row);
   const main = el("div", "cu-main");
   const title = el("div", "cu-title");
   title.textContent = task.name || "(untitled)";
@@ -577,7 +578,6 @@ const makeRow = (task: ClickUpTask, frente: string, onNote: () => void): HTMLEle
   noteHost.addEventListener("keydown", (event) => event.stopPropagation());
   noteHost.append(makeNoteButton(onNote));
   row.append(noteHost);
-  makeDoneCheckbox(task, row);
   row.addEventListener("click", () => attachTask(task));
   row.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {

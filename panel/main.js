@@ -2294,6 +2294,7 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     const row = el2("div", "cu-row");
     row.tabIndex = 0;
     row.setAttribute("role", "button");
+    makeDoneCheckbox(task, row);
     const main = el2("div", "cu-main");
     const title2 = el2("div", "cu-title");
     title2.textContent = task.name || "(untitled)";
@@ -2329,7 +2330,6 @@ textarea.oc-sdk-input { height: auto; padding: 8px 12px; resize: vertical; }
     noteHost.addEventListener("keydown", (event) => event.stopPropagation());
     noteHost.append(makeNoteButton(onNote));
     row.append(noteHost);
-    makeDoneCheckbox(task, row);
     row.addEventListener("click", () => attachTask(task));
     row.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
