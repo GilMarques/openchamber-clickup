@@ -32,7 +32,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 const file =
   process.env.OPENCHAMBER_GUEST_STORAGE ??
@@ -50,7 +50,62 @@ const safeId = (value) => {
   return id;
 };
 
-const noteFile = (taskId) => join(NOTES_DIR, `${safeId(taskId)}.md`);
+const safeTaskName = (name) =>
+  String(name ?? "")
+    .split("")
+    .map((ch) => {
+      const code = ch.codePointAt(0) ?? 32;
+      if (
+        ch === "/" ||
+        ch === "\\" ||
+        ch === ":" ||
+        ch === "*" ||
+        ch === "?" ||
+        ch === '"' ||
+        ch === "<" ||
+        ch === ">" ||
+        ch === "|" ||
+        code < 32 ||
+        code === 127
+      ) {
+        return "-";
+      }
+      return ch;
+    })
+    .join("")
+    .replace(/[. ]+$/, "")
+    .trim()
+    .slice(0, 100);
+
+const expectedName = (taskId, name) => {
+  const clean = safeTaskName(name);
+  return clean ? `${taskId} - ${clean}.md` : `${taskId}.md`;
+};
+
+const fileIdOf = (fileName) => {
+  if (!fileName.endsWith(".md")) return null;
+  const base = fileName.slice(0, -".md".length);
+  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
+  const sep = base.indexOf(" - ");
+  if (sep > 0) {
+    const id = base.slice(0, sep);
+    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
+  }
+  return null;
+};
+
+/** Find a task's note file: exact `<id>.md` wins, else the first `<id> - ….md`. */
+const findNoteFile = (taskId) => {
+  const id = safeId(taskId);
+  if (!existsSync(NOTES_DIR)) return null;
+  const names = readdirSync(NOTES_DIR)
+    .filter((entry) => entry.endsWith(".md"))
+    .sort();
+  const exact = `${id}.md`;
+  if (names.includes(exact)) return join(NOTES_DIR, exact);
+  const dashed = names.find((entry) => entry.startsWith(`${id} - `));
+  return dashed ? join(NOTES_DIR, dashed) : null;
+};
 const HEADER_SEP = "\n---\n\n";
 
 const splitBody = (content) => {
@@ -59,8 +114,10 @@ const splitBody = (content) => {
 };
 
 const readNoteBody = (taskId) => {
+  const file = findNoteFile(taskId);
+  if (!file) return null;
   try {
-    return splitBody(readFileSync(noteFile(taskId), "utf8"));
+    return splitBody(readFileSync(file, "utf8"));
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;
@@ -68,16 +125,20 @@ const readNoteBody = (taskId) => {
 };
 
 const writeNoteBody = (taskId, header, text) => {
+  const id = safeId(taskId);
   mkdirSync(NOTES_DIR, { recursive: true });
   const trimmed = String(text ?? "").trim();
-  writeFileSync(noteFile(taskId), `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
+  const file = findNoteFile(id) ?? join(NOTES_DIR, `${id}.md`);
+  writeFileSync(file, `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
   return trimmed;
 };
 
-const plainHeader = (taskId) => `# ${taskId}\n\n[${taskId}](https://app.clickup.com/t/${taskId})`;
+const plainHeader = (taskId) => `[${taskId}](https://app.clickup.com/t/${taskId})`;
 
 const openInObsidian = (taskId) => {
-  const uri = `obsidian://open?path=${encodeURIComponent(noteFile(taskId))}`;
+  const file = findNoteFile(taskId);
+  if (!file) throw new Error(`no note file for ${taskId}`);
+  const uri = `obsidian://open?path=${encodeURIComponent(file)}`;
   const result = spawnSync("xdg-open", [uri], { stdio: "ignore" });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`xdg-open exited with status ${result.status}`);
@@ -131,8 +192,14 @@ switch (command) {
   }
   case "notes": {
     if (!existsSync(NOTES_DIR)) break;
-    for (const name of readdirSync(NOTES_DIR).filter((entry) => entry.endsWith(".md"))) {
-      const taskId = basename(name, ".md");
+    if (!existsSync(NOTES_DIR)) break;
+    const seen = new Set();
+    for (const name of readdirSync(NOTES_DIR)
+      .filter((entry) => entry.endsWith(".md"))
+      .sort()) {
+      const taskId = fileIdOf(name);
+      if (!taskId || seen.has(taskId)) continue;
+      seen.add(taskId);
       const first = (readNoteBody(taskId) ?? "").split("\n")[0] ?? "";
       console.log(`${taskId}\t${first}`);
     }
@@ -152,10 +219,13 @@ switch (command) {
   case "note-del": {
     const id = safeId(args[0]);
     if (!id) usage();
-    try {
-      unlinkSync(noteFile(id));
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+    const file = findNoteFile(id);
+    if (file) {
+      try {
+        unlinkSync(file);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
     }
     pushEvent(data, "note-delete", id);
     write(data);

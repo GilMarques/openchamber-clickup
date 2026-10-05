@@ -32,11 +32,12 @@ reaches the extension page. The only OpenChamber capability it requests is the
   title. Ticks are per calendar day in your local time; the last 60 days are
   kept, so a new day starts unticked.
 - A **local note** on each task, kept as a markdown file in your Obsidian vault
-  (`~/Documents/obsidian/ClickUp/<taskId>.md`). Click the note icon and the note
-  opens **directly in Obsidian** — the extension runs a tiny local service that
-  launches it (created if missing). The icon turns **solid** once a note exists.
-  Notes are **never sent to ClickUp**, so pasted AI text stays out of your
-  workspace.
+  (`<id> - <taskname>.md`, e.g. `869e360uv - Distances - ….md`). Click the note
+  icon and the note opens **directly in Obsidian** — the extension runs a tiny
+  local service that launches it (created if missing). The icon turns **solid**
+  once a note exists. Notes are **never sent to ClickUp**, so pasted AI text
+  stays out of your workspace. Keep the `id - ` prefix: it is how everything
+  finds the file again.
 - The row's sub-label is the **sprint followed by the priority badge** (for
   example `Sprint 07` `urgent`). The **workflow status** is a small dot in the
   status's own ClickUp colour — no text (the status name is the dot's accessible
@@ -87,10 +88,11 @@ first use.
 
 ## Notes live in Obsidian
 
-Each task's note is a plain markdown file, `<taskId>.md`, in the notes folder —
-open it in Obsidian, edit it there, and the panel picks it up on its next
-refresh. The file starts with an `id - title` header (task id and name, link, sprint, status, list)
-followed by your text; agent-written notes keep the same shape.
+Each task's note is a plain markdown file named `<id> - <taskname>.md` — open
+it in Obsidian, edit it there, and the panel picks it up on its next
+refresh. The file starts with the link line (sprint, status, list); the
+filename itself is the title, so there is no `#` heading. Keep the `id - `
+prefix when renaming: it is how everything finds the file again.
 
 - **Click the note icon** on a row: the file is created from a template when
   missing, then opened **directly in Obsidian** through the extension's local
@@ -151,7 +153,7 @@ Done ticks and the event log live in a plain JSON file on the OpenChamber server
   "updated": "<epoch ms>" }
 ```
 
-Notes live as files instead: `~/Documents/obsidian/ClickUp/<taskId>.md`
+Notes live as files instead: `~/Documents/obsidian/ClickUp/<id> - <taskname>.md`
 (override with `$CLICKUP_NOTES_DIR` for scripts, or the extension's `notes-dir`
 setting for the panel).
 
@@ -227,8 +229,8 @@ symlinked into `~/.config/opencode/skills/clickup-tasks`.
 ### Notes open directly in Obsidian
 
 There is deliberately no editor in the extension anymore: no CodeMirror, no
-markdown renderer, no notes tab. A note is `<taskId>.md` in the notes folder,
-with an `id - title` header (task id and name, link, sprint, status, list) and your markdown below it.
+markdown renderer, no notes tab. A note is `<id> - <taskname>.md` in the notes folder,
+with a link line (sprint, status, list) and your markdown below it — no `#` heading, the filename is the title.
 The panel only ensures the file exists and shows whether it does; Obsidian does
 the editing. The extension requests exactly one outside-project grant for this:
 `filesystem: ["~/Documents/obsidian/ClickUp/**"]`.

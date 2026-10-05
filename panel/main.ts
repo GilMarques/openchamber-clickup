@@ -387,9 +387,11 @@ const persistDone = async (
   await recordEvent(action, taskId);
 };
 
-// Local notes live as markdown files in the user's Obsidian vault, one per
-// task. The panel never edits them — clicking the note icon ensures the file
-// exists and points Obsidian at it. Nothing is ever sent to ClickUp.
+// Local notes live as markdown files in the user's Obsidian vault. The file is
+// named `<id> - <taskname>.md` so the title shows in Obsidian's file list; the
+// note itself starts with the link line (no H1, the filename is the title).
+// The panel never edits files — clicking the note icon ensures the file exists
+// and points Obsidian at it. Nothing is ever sent to ClickUp.
 const DEFAULT_NOTES_DIR = "~/Documents/obsidian/ClickUp";
 
 const notesDir = (): string => {
@@ -397,35 +399,87 @@ const notesDir = (): string => {
   return configured || DEFAULT_NOTES_DIR;
 };
 
-const noteFileName = (taskId: string): string => `${taskId.replace(/[^A-Za-z0-9_-]/g, "_")}.md`;
+/** Filesystem-safe task name for filenames, capped so paths stay short. */
+const safeTaskName = (name: string | undefined): string => {
+  const clean = (name ?? "")
+    .split("")
+    .map((ch) => {
+      const code = ch.codePointAt(0) ?? 32;
+      if (
+        ch === "/" ||
+        ch === "\\" ||
+        ch === ":" ||
+        ch === "*" ||
+        ch === "?" ||
+        ch === '"' ||
+        ch === "<" ||
+        ch === ">" ||
+        ch === "|" ||
+        code < 32 ||
+        code === 127
+      )
+        return "-";
+      return ch;
+    })
+    .join("")
+    .replace(/[. ]+$/, "")
+    .trim()
+    .slice(0, 100);
+  return clean;
+};
 
-const notePath = (taskId: string): string => `${notesDir()}/${noteFileName(taskId)}`;
+const expectedFileName = (task: ClickUpTask): string => {
+  const clean = safeTaskName(task.name);
+  return clean ? `${task.id} - ${clean}.md` : `${task.id}.md`;
+};
 
-/** Task ids that have a note file, from a single directory listing. */
-let noteFiles = new Set<string>();
+/** Extract a task id from a vault filename (`<id>.md` or `<id> - ….md`). */
+const fileIdOf = (fileName: string): string | null => {
+  if (!fileName.endsWith(".md")) return null;
+  const base = fileName.slice(0, -".md".length);
+  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
+  const sep = base.indexOf(" - ");
+  if (sep > 0) {
+    const id = base.slice(0, sep);
+    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
+  }
+  return null;
+};
+
+/** Actual filenames by task id, from a single directory listing. Exact
+ * `<id>.md` wins over `<id> - ….md` so stale renames never shadow the file. */
+let noteFiles = new Map<string, string>();
 
 const readNoteFiles = async (): Promise<void> => {
   try {
     const { entries } = await host.listDir(notesDir());
-    noteFiles = new Set(
-      entries
-        .filter((entry) => entry.kind === "file" && entry.name.endsWith(".md"))
-        .map((entry) => entry.name.slice(0, -".md".length)),
-    );
+    const map = new Map<string, string>();
+    const names = entries
+      .filter((entry) => entry.kind === "file")
+      .map((entry) => entry.name)
+      .sort();
+    for (const pass of [false, true]) {
+      for (const name of names) {
+        const id = fileIdOf(name);
+        if (!id || map.has(id)) continue;
+        if (!pass && name !== `${id}.md`) continue;
+        map.set(id, name);
+      }
+    }
+    noteFiles = map;
   } catch {
     // Missing folder (or denied) simply means no notes yet.
-    noteFiles = new Set();
+    noteFiles = new Map();
   }
 };
 
 const noteTemplate = (task: ClickUpTask, body: string): string => {
   const url = task.url || `${DEFAULT_ORIGIN}/t/${task.id}`;
   const label = task.custom_id || task.id;
-  const title = task.name ? `${label} - ${task.name}` : label;
   const meta = [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
     .filter(Boolean)
     .join(" · ");
-  return `# ${title}\n\n[${label}](${url})${meta ? ` · ${meta}` : ""}\n\n---\n\n${body}`;
+  return `[${label}](${url})${meta ? ` · ${meta}` : ""}\n\n---\n\n${body}`;
 };
 
 /** One-time move of pre-file notes (`note:<id>` storage keys) into the vault. */
@@ -441,16 +495,12 @@ const migrateStorageNotes = async (): Promise<void> => {
     const taskId = key.slice("note:".length);
     try {
       const value = await host.storage.get(key);
-      if (typeof value === "string" && value) {
-        const path = notePath(taskId);
-        try {
-          await host.readFile(path);
-        } catch {
-          const task = state.tasks.find((entry) => entry.id === taskId);
-          await host.writeFile(path, task ? noteTemplate(task, value) : value);
-          noteFiles.add(taskId);
-          syncNoteButton(taskId);
-        }
+      if (typeof value === "string" && value && !noteFiles.has(taskId)) {
+        const task = state.tasks.find((entry) => entry.id === taskId);
+        const name = task ? expectedFileName(task) : `${taskId}.md`;
+        await host.writeFile(`${notesDir()}/${name}`, task ? noteTemplate(task, value) : value);
+        noteFiles.set(taskId, name);
+        syncNoteButton(taskId);
       }
       await host.storage.delete(key);
     } catch {
@@ -464,12 +514,16 @@ const migrateStorageNotes = async (): Promise<void> => {
  * Falls back to a copyable vault path when the service is unavailable. */
 const openInObsidian = (task: ClickUpTask): void => {
   void (async () => {
-    const path = notePath(task.id);
-    try {
-      await host.readFile(path);
-    } catch {
+    let name = noteFiles.get(task.id) ?? null;
+    if (!name) {
+      // Fresh check: the file may have appeared since the last listing.
+      await readNoteFiles();
+      name = noteFiles.get(task.id) ?? null;
+    }
+    if (!name) {
+      name = expectedFileName(task);
       try {
-        await host.writeFile(path, noteTemplate(task, ""));
+        await host.writeFile(`${notesDir()}/${name}`, noteTemplate(task, ""));
       } catch (error) {
         await host.toast({
           kind: "error",
@@ -477,10 +531,11 @@ const openInObsidian = (task: ClickUpTask): void => {
         });
         return;
       }
-      noteFiles.add(task.id);
+      noteFiles.set(task.id, name);
       renderContent();
       await recordEvent("note-set", task.id);
     }
+    const path = `${notesDir()}/${name}`;
     let answer: { status: number; body: string };
     try {
       answer = await host.serviceRequest({
@@ -524,7 +579,7 @@ const openInObsidian = (task: ClickUpTask): void => {
       });
       return;
     }
-    await host.toast({ kind: "success", message: `Opened ${noteFileName(task.id)} in Obsidian.` });
+    await host.toast({ kind: "success", message: `Opened ${name} in Obsidian.` });
   })();
 };
 

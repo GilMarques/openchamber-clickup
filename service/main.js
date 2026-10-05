@@ -49,6 +49,24 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
+/** Find a task's note file: exact `<id>.md` wins, else the first `<id> - ….md`. */
+const findNote = (dir, taskId) => {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const names = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+    .map((entry) => entry.name)
+    .sort();
+  const exact = `${taskId}.md`;
+  if (names.includes(exact)) return path.join(dir, exact);
+  const dashed = names.find((name) => name.startsWith(`${taskId} - `));
+  return dashed ? path.join(dir, dashed) : null;
+};
+
 const launch = (uri) =>
   new Promise((resolve) => {
     // The host starts services with a sanitized environment (PATH, HOME, temp,
@@ -142,7 +160,11 @@ const server = http.createServer((req, res) => {
           json(res, 400, { ok: false, error: "directory must be inside the home folder" });
           return;
         }
-        const file = path.join(dir, `${taskId}.md`);
+        const file = findNote(dir, taskId);
+        if (!file) {
+          json(res, 404, { ok: false, error: "note file not found" });
+          return;
+        }
         const uri = `obsidian://open?path=${encodeURIComponent(file)}`;
         const result = await launch(uri);
         if (!result.ok) {

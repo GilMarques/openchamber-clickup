@@ -39,7 +39,62 @@ const safeId = (value) => {
   return id;
 };
 
-const noteFile = (taskId) => join(notesDir(), `${safeId(taskId)}.md`);
+/** Sanitize a task name for filenames; spaces survive, slashes do not. */
+const safeTaskName = (name) =>
+  String(name ?? "")
+    .split("")
+    .map((ch) => {
+      const code = ch.codePointAt(0) ?? 32;
+      if (
+        ch === "/" ||
+        ch === "\\" ||
+        ch === ":" ||
+        ch === "*" ||
+        ch === "?" ||
+        ch === '"' ||
+        ch === "<" ||
+        ch === ">" ||
+        ch === "|" ||
+        code < 32 ||
+        code === 127
+      ) {
+        return "-";
+      }
+      return ch;
+    })
+    .join("")
+    .replace(/[. ]+$/, "")
+    .trim()
+    .slice(0, 100);
+
+const expectedName = (task, taskId) => {
+  const clean = safeTaskName(task?.name);
+  return clean ? `${taskId} - ${clean}.md` : `${taskId}.md`;
+};
+
+const fileIdOf = (fileName) => {
+  if (!fileName.endsWith(".md")) return null;
+  const base = fileName.slice(0, -".md".length);
+  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
+  const sep = base.indexOf(" - ");
+  if (sep > 0) {
+    const id = base.slice(0, sep);
+    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
+  }
+  return null;
+};
+
+/** Find a task's note file: exact `<id>.md` wins, else the first `<id> - ….md`. */
+const findNoteFile = (taskId) => {
+  ensureNotesDir();
+  const names = readdirSync(notesDir())
+    .filter((name) => name.endsWith(".md"))
+    .sort();
+  const exact = `${taskId}.md`;
+  if (names.includes(exact)) return join(notesDir(), exact);
+  const dashed = names.find((name) => name.startsWith(`${taskId} - `));
+  return dashed ? join(notesDir(), dashed) : null;
+};
 
 const ensureNotesDir = () => mkdirSync(notesDir(), { recursive: true });
 
@@ -52,8 +107,10 @@ const splitBody = (content) => {
 };
 
 const readNoteBody = (taskId) => {
+  const file = findNoteFile(taskId);
+  if (!file) return null;
   try {
-    return splitBody(readFileSync(noteFile(taskId), "utf8"));
+    return splitBody(readFileSync(file, "utf8"));
   } catch (error) {
     if (error?.code === "ENOENT") return null;
     throw error;
@@ -155,14 +212,20 @@ const writeNoteBody = (task, text) => {
   ensureNotesDir();
   const trimmed = String(text ?? "").trim();
   const label = task.customId ?? task.id;
-  const title = task.name ? `${label} - ${task.name}` : label;
   const meta = [task.sprint, task.status, task.list].filter(Boolean).join(" · ");
   const header =
-    `# ${title}\n\n` +
     `[${label}](${task.url ?? `https://app.clickup.com/t/${task.id}`})` +
     `${meta ? ` · ${meta}` : ""}`;
-  writeFileSync(noteFile(task.id), `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
-  return trimmed;
+  const wanted = expectedName(task, task.id);
+  const found = findNoteFile(task.id);
+  let file = found ?? join(notesDir(), wanted);
+  if (found && basename(found) !== wanted) {
+    const next = join(notesDir(), wanted);
+    renameSync(found, next);
+    file = next;
+  }
+  writeFileSync(file, `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
+  return { text: trimmed, path: file };
 };
 
 /** Best-effort task lookup for note headers; falls back to the bare id. */
@@ -187,9 +250,9 @@ const describeTask = async (taskId) => {
 };
 
 /** Launch Obsidian on a note file through the OS-registered URI handler. */
-const openInObsidian = (taskId) =>
+const openInObsidian = (absFile) =>
   new Promise((resolve, reject) => {
-    const uri = `obsidian://open?path=${encodeURIComponent(noteFile(taskId))}`;
+    const uri = `obsidian://open?path=${encodeURIComponent(absFile)}`;
     const child = spawn("xdg-open", [uri], { detached: true, stdio: "ignore" });
     child.on("error", reject);
     child.unref();
@@ -349,13 +412,17 @@ const callTool = async (name, args = {}) => {
     }
     case "notes_list": {
       ensureNotesDir();
-      const files = readdirSync(notesDir()).filter((name) => name.endsWith(".md"));
-      return {
-        notes: files.map((name) => {
-          const taskId = basename(name, ".md");
-          return { taskId, text: readNoteBody(taskId) ?? "" };
-        }),
-      };
+      const seen = new Set();
+      const notes = [];
+      for (const name of readdirSync(notesDir())
+        .filter((entry) => entry.endsWith(".md"))
+        .sort()) {
+        const taskId = fileIdOf(name);
+        if (!taskId || seen.has(taskId)) continue;
+        seen.add(taskId);
+        notes.push({ taskId, file: name, text: readNoteBody(taskId) ?? "" });
+      }
+      return { notes };
     }
     case "note_get": {
       const taskId = safeId(args.taskId);
@@ -365,19 +432,22 @@ const callTool = async (name, args = {}) => {
       const taskId = safeId(args.taskId);
       const raw = String(args.text ?? "").trim();
       if (!raw) throw new Error("text is required");
-      const text = writeNoteBody(await describeTask(taskId), raw);
+      const { text, path } = writeNoteBody(await describeTask(taskId), raw);
       const data = readState();
       pushEvent(data, "note-set", taskId);
       touch(data);
       writeState(data);
-      return { taskId, text, path: noteFile(taskId), saved: true };
+      return { taskId, text, path, saved: true };
     }
     case "note_delete": {
       const taskId = safeId(args.taskId);
-      try {
-        unlinkSync(noteFile(taskId));
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
+      const file = findNoteFile(taskId);
+      if (file) {
+        try {
+          unlinkSync(file);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
       }
       const data = readState();
       pushEvent(data, "note-delete", taskId);
@@ -387,9 +457,10 @@ const callTool = async (name, args = {}) => {
     }
     case "note_open": {
       const taskId = safeId(args.taskId);
-      if (readNoteBody(taskId) === null) writeNoteBody(await describeTask(taskId), "");
-      const uri = await openInObsidian(taskId);
-      return { taskId, path: noteFile(taskId), uri, opened: true };
+      let file = findNoteFile(taskId);
+      if (!file) file = writeNoteBody(await describeTask(taskId), "").path;
+      const uri = await openInObsidian(file);
+      return { taskId, path: file, uri, opened: true };
     }
     case "done_list": {
       const data = readState();

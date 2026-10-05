@@ -7,7 +7,7 @@ description: Read and manipulate the OpenChamber "ClickUp Tasks" extension local
 
 The OpenChamber extension lives at `/home/gil/clickup-tasks` (rail panel,
 `/clickup` command, MCP tool styling). Notes live as markdown files in the
-user's Obsidian vault (`~/Documents/obsidian/ClickUp/<taskId>.md`); done ticks
+user's Obsidian vault (`~/Documents/obsidian/ClickUp/<id> - <taskname>.md`); done ticks
 and the event log live as plain JSON on the OpenChamber server. Nothing here
 writes to ClickUp unless you explicitly call the ClickUp API.
 
@@ -45,15 +45,19 @@ node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
 ## Storage contract
 
 ```
-~/Documents/obsidian/ClickUp/<taskId>.md   (notes; `id - title` header + markdown body)
+~/Documents/obsidian/ClickUp/<id> - <taskname>.md   (notes; link line + markdown body, no H1)
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
   "events": [ { "at": "2026-10-04T21:44:03.604Z", "type": "done-add", "taskId": "…", "date": "2026-10-04" } ],
   "updated": "<epoch ms>" }
 ```
 
-- One markdown file per task: an `id - title` header (`# 869epr6z9 - Improve
-  dialog`), link + sprint/status/list line, then `---`, then the body. `note_get`/`notes_list` return the body only.
+- One markdown file per task, named `<id> - <taskname>.md` (sanitized, capped at
+  100 chars): link + sprint/status/list line, then `---`, then the body — no `#`
+  heading, the filename is the title. `note_get`/`notes_list` return the body
+  only. Keep the `id - ` prefix when renaming; exact `<id>.md` also matches.
+  Writers rename a mismatched file to the current task name when they save
+  (panel never renames — it has no delete).
 - `done` keeps the last 60 days, one entry per date.
 - `events` is an append-only timestamped history of every note/done change
   (`done-add`, `done-remove`, `note-set`, `note-delete`), newest last, capped at
@@ -84,7 +88,8 @@ The panel also re-reads on a forced refresh (the refresh icon).
 ## Notes
 
 - Notes are **markdown files in the Obsidian vault**
-  (`~/Documents/obsidian/ClickUp/<taskId>.md`): header plus body. Keep
+  (`~/Documents/obsidian/ClickUp/<id> - <taskname>.md`): link line plus body, no
+  `#` heading. Keep
   agent-written bodies markdown. The extension has no editor — clicking a task's
   note icon opens the file **directly in Obsidian** through the extension's local
   service (`service/main.js`, `POST /open`, scoped to the home folder). The rail
