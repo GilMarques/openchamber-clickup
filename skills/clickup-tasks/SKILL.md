@@ -45,19 +45,24 @@ node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
 ## Storage contract
 
 ```
-~/Documents/obsidian/ClickUp/<id> - <taskname>.md   (notes; link line + markdown body, no H1)
+~/Documents/obsidian/ClickUp/<Frente>/<id> - <taskname>.md   (notes: frontmatter + link line + body, no H1)
+~/Documents/obsidian/ClickUp/ClickUp.base   (generated Bases table: group by frente, sprint order)
 ~/.config/openchamber/guest-storage/clickup-tasks.json
 { "done": { "YYYY-MM-DD": ["<taskId>"] },
   "events": [ { "at": "2026-10-04T21:44:03.604Z", "type": "done-add", "taskId": "…", "date": "2026-10-04" } ],
   "updated": "<epoch ms>" }
 ```
 
-- One markdown file per task, named `<id> - <taskname>.md` (sanitized, capped at
-  100 chars): link + sprint/status/list line, then `---`, then the body — no `#`
-  heading, the filename is the title. `note_get`/`notes_list` return the body
-  only. Keep the `id - ` prefix when renaming; exact `<id>.md` also matches.
-  Writers rename a mismatched file to the current task name when they save
-  (panel never renames — it has no delete).
+- One markdown file per task, at `<Frente>/<id> - <taskname>.md` (sanitized,
+  capped): YAML frontmatter (`taskId`, `title`, `frente`, `sprint`,
+  `sprintOrder`, `status`, `priority`, `list`, `url`, `parent`), then the link
+  + sprint/status/list line, then `---`, then the body — no `#` heading, the
+  filename is the title. `note_get`/`notes_list` return the body only. Keep the
+  `id - ` prefix when renaming; exact `<id>.md` also matches. Recursive lookup
+  everywhere (panel, MCP, CLI, service); writers move a mismatched file to its
+  canonical folder on save (panel never moves — it has no delete).
+- `ClickUp.base` is generated (table grouped by `frente`, ordered by
+  `sprintOrder`); writers recreate it when missing.
 - `done` keeps the last 60 days, one entry per date.
 - `events` is an append-only timestamped history of every note/done change
   (`done-add`, `done-remove`, `note-set`, `note-delete`), newest last, capped at
@@ -69,7 +74,9 @@ node /home/gil/clickup-tasks/scripts/state.mjs events [taskId]
 - Always write atomically (temp file + rename, mode 600) so a concurrent panel
   write cannot interleave. Prefer the CLI/MCP over hand-editing.
 - Notes dir override: `$CLICKUP_NOTES_DIR` (scripts/MCP) or the extension's
-  `notes-dir` setting (panel). Task ids are validated (`^[A-Za-z0-9_-]+$`) and
+  `notes-dir` setting (panel). Frente/sprint-field overrides: `$CLICKUP_FRENTE_FOLDER`
+  / `$CLICKUP_SPRINT_FIELD` (default `Frentes` / `Sprints`, matching the panel
+  settings). Task ids are validated (`^[A-Za-z0-9_-]+$`) and
   never used as raw paths.
 
 The panel also re-reads on a forced refresh (the refresh icon).

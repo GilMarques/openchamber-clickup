@@ -33,6 +33,19 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  BASE_FILENAME,
+  baseFileContent,
+  buildNoteMeta,
+  canonicalRelPath,
+  fileIdOf,
+  findBestMatch,
+  indexNotes,
+  serializeNote,
+  splitBody,
+  stripFrontmatter,
+  walkMarkdown,
+} from "../lib/notes.mjs";
 
 const file =
   process.env.OPENCHAMBER_GUEST_STORAGE ??
@@ -50,71 +63,33 @@ const safeId = (value) => {
   return id;
 };
 
-const safeTaskName = (name) =>
-  String(name ?? "")
-    .split("")
-    .map((ch) => {
-      const code = ch.codePointAt(0) ?? 32;
-      if (
-        ch === "/" ||
-        ch === "\\" ||
-        ch === ":" ||
-        ch === "*" ||
-        ch === "?" ||
-        ch === '"' ||
-        ch === "<" ||
-        ch === ">" ||
-        ch === "|" ||
-        code < 32 ||
-        code === 127
-      ) {
-        return "-";
-      }
-      return ch;
-    })
-    .join("")
-    .replace(/[. ]+$/, "")
-    .trim()
-    .slice(0, 100);
+const fsListDir = async (dir) =>
+  readdirSync(dir, { withFileTypes: true }).map((entry) => ({
+    name: entry.name,
+    kind: entry.isFile() ? "file" : entry.isDirectory() ? "directory" : "other",
+  }));
 
-const expectedName = (taskId, name) => {
-  const clean = safeTaskName(name);
-  return clean ? `${taskId} - ${clean}.md` : `${taskId}.md`;
-};
-
-const fileIdOf = (fileName) => {
-  if (!fileName.endsWith(".md")) return null;
-  const base = fileName.slice(0, -".md".length);
-  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
-  const sep = base.indexOf(" - ");
-  if (sep > 0) {
-    const id = base.slice(0, sep);
-    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
-  }
-  return null;
-};
-
-/** Find a task's note file: exact `<id>.md` wins, else the first `<id> - ….md`. */
-const findNoteFile = (taskId) => {
+/** Find a task's note file anywhere under the notes dir (exact wins). */
+const findNoteFile = async (taskId) => {
   const id = safeId(taskId);
   if (!existsSync(NOTES_DIR)) return null;
-  const names = readdirSync(NOTES_DIR)
-    .filter((entry) => entry.endsWith(".md"))
-    .sort();
-  const exact = `${id}.md`;
-  if (names.includes(exact)) return join(NOTES_DIR, exact);
-  const dashed = names.find((entry) => entry.startsWith(`${id} - `));
-  return dashed ? join(NOTES_DIR, dashed) : null;
-};
-const HEADER_SEP = "\n---\n\n";
-
-const splitBody = (content) => {
-  const at = content.indexOf(HEADER_SEP);
-  return at < 0 ? content : content.slice(at + HEADER_SEP.length);
+  const rel = findBestMatch(await walkMarkdown(fsListDir, NOTES_DIR), id);
+  return rel ? join(NOTES_DIR, rel) : null;
 };
 
-const readNoteBody = (taskId) => {
-  const file = findNoteFile(taskId);
+const ensureBaseFile = () => {
+  mkdirSync(NOTES_DIR, { recursive: true });
+  const base = join(NOTES_DIR, BASE_FILENAME);
+  try {
+    readFileSync(base, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    writeFileSync(base, baseFileContent(), { mode: 0o600 });
+  }
+};
+
+const readNoteBody = async (taskId) => {
+  const file = await findNoteFile(taskId);
   if (!file) return null;
   try {
     return splitBody(readFileSync(file, "utf8"));
@@ -124,19 +99,31 @@ const readNoteBody = (taskId) => {
   }
 };
 
-const writeNoteBody = (taskId, header, text) => {
+const writeNoteBody = async (taskId, header, text) => {
   const id = safeId(taskId);
   mkdirSync(NOTES_DIR, { recursive: true });
   const trimmed = String(text ?? "").trim();
-  const file = findNoteFile(id) ?? join(NOTES_DIR, `${id}.md`);
-  writeFileSync(file, `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
+  const file = (await findNoteFile(id)) ?? join(NOTES_DIR, `${id}.md`);
+  // Preserve existing frontmatter (written with full task metadata); the CLI
+  // only knows the id, so a fresh file gets a minimal block.
+  let meta = { taskId: id, clickupNote: true };
+  if (existsSync(file)) {
+    try {
+      const { meta: old } = stripFrontmatter(readFileSync(file, "utf8"));
+      if (old && typeof old === "object") meta = { ...old, taskId: id, clickupNote: true };
+    } catch {
+      // Unreadable file: overwrite with a fresh header below.
+    }
+  }
+  writeFileSync(file, serializeNote(meta, header, trimmed), { mode: 0o600 });
+  ensureBaseFile();
   return trimmed;
 };
 
 const plainHeader = (taskId) => `[${taskId}](https://app.clickup.com/t/${taskId})`;
 
-const openInObsidian = (taskId) => {
-  const file = findNoteFile(taskId);
+const openInObsidian = async (taskId) => {
+  const file = await findNoteFile(taskId);
   if (!file) throw new Error(`no note file for ${taskId}`);
   const uri = `obsidian://open?path=${encodeURIComponent(file)}`;
   const result = spawnSync("xdg-open", [uri], { stdio: "ignore" });
@@ -192,15 +179,8 @@ switch (command) {
   }
   case "notes": {
     if (!existsSync(NOTES_DIR)) break;
-    if (!existsSync(NOTES_DIR)) break;
-    const seen = new Set();
-    for (const name of readdirSync(NOTES_DIR)
-      .filter((entry) => entry.endsWith(".md"))
-      .sort()) {
-      const taskId = fileIdOf(name);
-      if (!taskId || seen.has(taskId)) continue;
-      seen.add(taskId);
-      const first = (readNoteBody(taskId) ?? "").split("\n")[0] ?? "";
+    for (const taskId of indexNotes(await walkMarkdown(fsListDir, NOTES_DIR)).keys()) {
+      const first = ((await readNoteBody(taskId)) ?? "").split("\n")[0] ?? "";
       console.log(`${taskId}\t${first}`);
     }
     break;
@@ -210,7 +190,7 @@ switch (command) {
     const id = safeId(rawId);
     const text = rest.join(" ").trim();
     if (!id || !text) usage();
-    writeNoteBody(id, plainHeader(id), text);
+    await writeNoteBody(id, plainHeader(id), text);
     pushEvent(data, "note-set", id);
     write(data);
     console.log(`note set on ${id}`);
@@ -219,7 +199,7 @@ switch (command) {
   case "note-del": {
     const id = safeId(args[0]);
     if (!id) usage();
-    const file = findNoteFile(id);
+    const file = await findNoteFile(id);
     if (file) {
       try {
         unlinkSync(file);
@@ -235,8 +215,8 @@ switch (command) {
   case "note-open": {
     const id = safeId(args[0]);
     if (!id) usage();
-    if (readNoteBody(id) === null) writeNoteBody(id, plainHeader(id), "");
-    console.log(openInObsidian(id));
+    if ((await readNoteBody(id)) === null) await writeNoteBody(id, plainHeader(id), "");
+    console.log(await openInObsidian(id));
     break;
   }
   case "done-list": {

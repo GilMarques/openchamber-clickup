@@ -49,22 +49,40 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
-/** Find a task's note file: exact `<id>.md` wins, else the first `<id> - ….md`. */
-const findNote = (dir, taskId) => {
-  let entries;
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return null;
+/** Extract a task id from a vault filename (`<id>.md` or `<id> - ….md`). */
+const fileIdOf = (fileName) => {
+  if (!fileName.endsWith(".md")) return null;
+  const base = fileName.slice(0, -".md".length);
+  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
+  const sep = base.indexOf(" - ");
+  if (sep > 0) {
+    const id = base.slice(0, sep);
+    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
   }
-  const names = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-    .map((entry) => entry.name)
-    .sort();
-  const exact = `${taskId}.md`;
-  if (names.includes(exact)) return path.join(dir, exact);
-  const dashed = names.find((name) => name.startsWith(`${taskId} - `));
-  return dashed ? path.join(dir, dashed) : null;
+  return null;
+};
+
+/** Find a task's note file anywhere under the dir: exact `<id>.md` wins,
+ * else the first `<id> - ….md` in sort order. Unreadable subtrees are skipped. */
+const findNote = (dir, taskId) => {
+  const hits = [];
+  const walk = (current) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && fileIdOf(entry.name) === taskId) hits.push(full);
+    }
+  };
+  walk(dir);
+  hits.sort();
+  const exact = hits.find((full) => full === path.join(dir, `${taskId}.md`));
+  return exact ?? hits[0] ?? null;
 };
 
 const launch = (uri) =>

@@ -86,13 +86,25 @@ The **Notes folder** field sets where note files live inside your Obsidian vault
 `~/Documents/obsidian/` to match the approved grant; the folder is created on
 first use.
 
-## Notes live in Obsidian
+## Notes live in Obsidian, in a tree
 
-Each task's note is a plain markdown file named `<id> - <taskname>.md` — open
-it in Obsidian, edit it there, and the panel picks it up on its next
-refresh. The file starts with the link line (sprint, status, list); the
-filename itself is the title, so there is no `#` heading. Keep the `id - `
-prefix when renaming: it is how everything finds the file again.
+Each task's note is a plain markdown file at `<Frente>/<id> - <taskname>.md`
+inside the notes folder — one subfolder per frente group, exactly mirroring the
+panel (`<folder> (no frente)` for the rest). Open it in Obsidian, edit it
+there, and the panel picks it up on its next refresh. The filename itself is
+the title, so there is no `#` heading; the file starts with the link line
+(sprint, status, list). Keep the `id - ` prefix when renaming: it is how
+everything finds the file again. Renaming or moving a task's note happens
+automatically the next time an agent writes it (the panel itself never moves
+files — it has no delete).
+
+Every note also carries YAML frontmatter (`taskId`, `title`, `frente`,
+`sprint`, `sprintOrder`, `status`, `priority`, `list`, `url`, `parent`) so
+Obsidian can query it. `ClickUp.base` at the notes root defines a table view
+grouped by frente and ordered by sprint — open it in Obsidian (Bases is a core
+plugin, no install needed) for the panel's tree as a live table. Subtasks nest
+in the panel; in Obsidian they sit in their own frente folder with a `parent`
+property linking them.
 
 - **Click the note icon** on a row: the file is created from a template when
   missing, then opened **directly in Obsidian** through the extension's local

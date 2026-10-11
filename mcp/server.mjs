@@ -20,8 +20,22 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import {
+  BASE_FILENAME,
+  baseFileContent,
+  buildNoteMeta,
+  canonicalRelPath,
+  findBestMatch,
+  indexNotes,
+  serializeNote,
+  splitBody,
+  walkMarkdown,
+} from "../lib/notes.mjs";
+
+const FRENTE_FOLDER = (process.env.CLICKUP_FRENTE_FOLDER ?? "").trim() || "Frentes";
+const SPRINT_FIELD = (process.env.CLICKUP_SPRINT_FIELD ?? "").trim() || "Sprints";
 
 const STORAGE =
   process.env.OPENCHAMBER_GUEST_STORAGE ??
@@ -39,75 +53,27 @@ const safeId = (value) => {
   return id;
 };
 
-/** Sanitize a task name for filenames; spaces survive, slashes do not. */
-const safeTaskName = (name) =>
-  String(name ?? "")
-    .split("")
-    .map((ch) => {
-      const code = ch.codePointAt(0) ?? 32;
-      if (
-        ch === "/" ||
-        ch === "\\" ||
-        ch === ":" ||
-        ch === "*" ||
-        ch === "?" ||
-        ch === '"' ||
-        ch === "<" ||
-        ch === ">" ||
-        ch === "|" ||
-        code < 32 ||
-        code === 127
-      ) {
-        return "-";
-      }
-      return ch;
-    })
-    .join("")
-    .replace(/[. ]+$/, "")
-    .trim()
-    .slice(0, 100);
-
-const expectedName = (task, taskId) => {
-  const clean = safeTaskName(task?.name);
-  return clean ? `${taskId} - ${clean}.md` : `${taskId}.md`;
-};
-
-const fileIdOf = (fileName) => {
-  if (!fileName.endsWith(".md")) return null;
-  const base = fileName.slice(0, -".md".length);
-  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
-  const sep = base.indexOf(" - ");
-  if (sep > 0) {
-    const id = base.slice(0, sep);
-    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
-  }
-  return null;
-};
-
-/** Find a task's note file: exact `<id>.md` wins, else the first `<id> - ….md`. */
-const findNoteFile = (taskId) => {
+/** Find a task's note file anywhere under the notes dir (exact wins). */
+const findNoteFile = async (taskId) => {
+  const id = safeId(taskId);
   ensureNotesDir();
-  const names = readdirSync(notesDir())
-    .filter((name) => name.endsWith(".md"))
-    .sort();
-  const exact = `${taskId}.md`;
-  if (names.includes(exact)) return join(notesDir(), exact);
-  const dashed = names.find((name) => name.startsWith(`${taskId} - `));
-  return dashed ? join(notesDir(), dashed) : null;
+  const relPaths = await walkMarkdown(fsListDir, notesDir());
+  const rel = findBestMatch(relPaths, id);
+  return rel ? join(notesDir(), rel) : null;
+};
+
+const fsListDir = async (dir) => {
+  const entries = readdirSync(dir, { withFileTypes: true });
+  return entries.map((entry) => ({
+    name: entry.name,
+    kind: entry.isFile() ? "file" : entry.isDirectory() ? "directory" : "other",
+  }));
 };
 
 const ensureNotesDir = () => mkdirSync(notesDir(), { recursive: true });
 
-const HEADER_SEP = "\n---\n\n";
-
-/** Split a note file into its template header and the editable body. */
-const splitBody = (content) => {
-  const at = content.indexOf(HEADER_SEP);
-  return at < 0 ? content : content.slice(at + HEADER_SEP.length);
-};
-
-const readNoteBody = (taskId) => {
-  const file = findNoteFile(taskId);
+const readNoteBody = async (taskId) => {
+  const file = await findNoteFile(taskId);
   if (!file) return null;
   try {
     return splitBody(readFileSync(file, "utf8"));
@@ -200,7 +166,7 @@ const compact = (task) => ({
   name: task.name ?? "",
   status: task.status?.status ?? null,
   priority: task.priority?.priority ?? null,
-  sprint: resolveField(task, "Sprints"),
+  sprint: resolveField(task, SPRINT_FIELD),
   list: task.list?.name ?? null,
   folder: task.project?.name ?? task.folder?.name ?? null,
   dueDate: task.due_date ? new Date(Number(task.due_date)).toISOString().slice(0, 10) : null,
@@ -208,23 +174,68 @@ const compact = (task) => ({
   url: task.url ?? null,
 });
 
-const writeNoteBody = (task, text) => {
-  ensureNotesDir();
-  const trimmed = String(text ?? "").trim();
+const noteMetaOf = (task) =>
+  buildNoteMeta({
+    taskId: task.id,
+    customId: task.customId,
+    title: task.name,
+    listName: task.list,
+    folderName: task.folder,
+    frenteFolderName: FRENTE_FOLDER,
+    sprint: task.sprint,
+    status: task.status,
+    priority: task.priority,
+    url: task.url,
+    parent: task.parent,
+  });
+
+const noteLinkLine = (task) => {
   const label = task.customId ?? task.id;
   const meta = [task.sprint, task.status, task.list].filter(Boolean).join(" · ");
-  const header =
+  return (
     `[${label}](${task.url ?? `https://app.clickup.com/t/${task.id}`})` +
-    `${meta ? ` · ${meta}` : ""}`;
-  const wanted = expectedName(task, task.id);
-  const found = findNoteFile(task.id);
-  let file = found ?? join(notesDir(), wanted);
-  if (found && basename(found) !== wanted) {
+    `${meta ? ` · ${meta}` : ""}`
+  );
+};
+
+/** Ensure the generated Bases view exists. */
+const ensureBaseFile = () => {
+  ensureNotesDir();
+  const base = join(notesDir(), BASE_FILENAME);
+  try {
+    readFileSync(base, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    writeFileSync(base, baseFileContent(), { mode: 0o600 });
+  }
+};
+
+const writeNoteBody = async (task, text) => {
+  ensureNotesDir();
+  const trimmed = String(text ?? "").trim();
+  const wanted = canonicalRelPath({
+    taskId: task.id,
+    taskName: task.name,
+    listName: task.list,
+    folderName: task.folder,
+    frenteFolderName: FRENTE_FOLDER,
+  });
+  const foundRel = await (async () => {
+    const relPaths = await walkMarkdown(fsListDir, notesDir());
+    return findBestMatch(relPaths, task.id);
+  })();
+  let file = foundRel ? join(notesDir(), foundRel) : join(notesDir(), wanted);
+  if (foundRel && foundRel !== wanted && task.name) {
     const next = join(notesDir(), wanted);
-    renameSync(found, next);
+    mkdirSync(dirname(next), { recursive: true });
+    renameSync(file, next);
     file = next;
   }
-  writeFileSync(file, `${header}${HEADER_SEP}${trimmed}\n`, { mode: 0o600 });
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, serializeNote(noteMetaOf(task), noteLinkLine(task), trimmed), {
+    mode: 0o600,
+  });
+  ensureBaseFile();
   return { text: trimmed, path: file };
 };
 
@@ -412,27 +423,22 @@ const callTool = async (name, args = {}) => {
     }
     case "notes_list": {
       ensureNotesDir();
-      const seen = new Set();
+      const relPaths = await walkMarkdown(fsListDir, notesDir());
       const notes = [];
-      for (const name of readdirSync(notesDir())
-        .filter((entry) => entry.endsWith(".md"))
-        .sort()) {
-        const taskId = fileIdOf(name);
-        if (!taskId || seen.has(taskId)) continue;
-        seen.add(taskId);
-        notes.push({ taskId, file: name, text: readNoteBody(taskId) ?? "" });
+      for (const [taskId, rel] of indexNotes(relPaths)) {
+        notes.push({ taskId, file: rel, text: (await readNoteBody(taskId)) ?? "" });
       }
       return { notes };
     }
     case "note_get": {
       const taskId = safeId(args.taskId);
-      return { taskId, text: readNoteBody(taskId) };
+      return { taskId, text: await readNoteBody(taskId) };
     }
     case "note_set": {
       const taskId = safeId(args.taskId);
       const raw = String(args.text ?? "").trim();
       if (!raw) throw new Error("text is required");
-      const { text, path } = writeNoteBody(await describeTask(taskId), raw);
+      const { text, path } = await writeNoteBody(await describeTask(taskId), raw);
       const data = readState();
       pushEvent(data, "note-set", taskId);
       touch(data);
@@ -441,7 +447,7 @@ const callTool = async (name, args = {}) => {
     }
     case "note_delete": {
       const taskId = safeId(args.taskId);
-      const file = findNoteFile(taskId);
+      const file = await findNoteFile(taskId);
       if (file) {
         try {
           unlinkSync(file);
@@ -457,8 +463,8 @@ const callTool = async (name, args = {}) => {
     }
     case "note_open": {
       const taskId = safeId(args.taskId);
-      let file = findNoteFile(taskId);
-      if (!file) file = writeNoteBody(await describeTask(taskId), "").path;
+      let file = await findNoteFile(taskId);
+      if (!file) file = (await writeNoteBody(await describeTask(taskId), "")).path;
       const uri = await openInObsidian(file);
       return { taskId, path: file, uri, opened: true };
     }

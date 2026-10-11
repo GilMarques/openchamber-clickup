@@ -39,6 +39,16 @@ import {
   pushEvent,
   type LocalEvent,
 } from "./local.ts";
+import {
+  BASE_FILENAME,
+  baseFileContent,
+  buildNoteMeta,
+  canonicalRelPath,
+  indexNotes,
+  serializeNote,
+  walkMarkdown,
+} from "../lib/notes.mjs";
+import type { NoteMeta } from "../lib/notes.mjs";
 
 // --- ClickUp API glue -------------------------------------------------------
 
@@ -399,88 +409,77 @@ const notesDir = (): string => {
   return configured || DEFAULT_NOTES_DIR;
 };
 
-/** Filesystem-safe task name for filenames, capped so paths stay short. */
-const safeTaskName = (name: string | undefined): string => {
-  const clean = (name ?? "")
-    .split("")
-    .map((ch) => {
-      const code = ch.codePointAt(0) ?? 32;
-      if (
-        ch === "/" ||
-        ch === "\\" ||
-        ch === ":" ||
-        ch === "*" ||
-        ch === "?" ||
-        ch === '"' ||
-        ch === "<" ||
-        ch === ">" ||
-        ch === "|" ||
-        code < 32 ||
-        code === 127
-      )
-        return "-";
-      return ch;
-    })
-    .join("")
-    .replace(/[. ]+$/, "")
-    .trim()
-    .slice(0, 100);
-  return clean;
+/** Canonical vault-relative path for a task's note (frente subfolder). */
+const canonicalFor = (task: ClickUpTask): string =>
+  canonicalRelPath({
+    taskId: task.id,
+    taskName: task.name,
+    listName: task.list?.name,
+    folderName: task.project?.name ?? task.folder?.name,
+    frenteFolderName: frenteFolder(),
+  });
+
+/** Frontmatter meta for a task's note file. */
+const noteMetaOf = (task: ClickUpTask): NoteMeta =>
+  buildNoteMeta({
+    taskId: task.id,
+    customId: task.custom_id,
+    title: task.name,
+    listName: task.list?.name,
+    folderName: task.project?.name ?? task.folder?.name,
+    frenteFolderName: frenteFolder(),
+    sprint: resolveCustomField(task, sprintField()),
+    status: task.status?.status,
+    priority: task.priority?.priority,
+    url: task.url || `${DEFAULT_ORIGIN}/t/${task.id}`,
+    parent: task.parent,
+  });
+
+const noteLinkLine = (task: ClickUpTask): string => {
+  const url = task.url || `${DEFAULT_ORIGIN}/t/${task.id}`;
+  const label = task.custom_id || task.id;
+  const meta = [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
+    .filter(Boolean)
+    .join(" · ");
+  return `[${label}](${url})${meta ? ` · ${meta}` : ""}`;
 };
 
-const expectedFileName = (task: ClickUpTask): string => {
-  const clean = safeTaskName(task.name);
-  return clean ? `${task.id} - ${clean}.md` : `${task.id}.md`;
-};
-
-/** Extract a task id from a vault filename (`<id>.md` or `<id> - ….md`). */
-const fileIdOf = (fileName: string): string | null => {
-  if (!fileName.endsWith(".md")) return null;
-  const base = fileName.slice(0, -".md".length);
-  if (/^[A-Za-z0-9_-]+$/.test(base)) return base;
-  const sep = base.indexOf(" - ");
-  if (sep > 0) {
-    const id = base.slice(0, sep);
-    if (/^[A-Za-z0-9_-]+$/.test(id)) return id;
-  }
-  return null;
-};
-
-/** Actual filenames by task id, from a single directory listing. Exact
- * `<id>.md` wins over `<id> - ….md` so stale renames never shadow the file. */
+/** Actual vault-relative paths by task id, from a recursive listing. */
 let noteFiles = new Map<string, string>();
 
 const readNoteFiles = async (): Promise<void> => {
   try {
-    const { entries } = await host.listDir(notesDir());
-    const map = new Map<string, string>();
-    const names = entries
-      .filter((entry) => entry.kind === "file")
-      .map((entry) => entry.name)
-      .sort();
-    for (const pass of [false, true]) {
-      for (const name of names) {
-        const id = fileIdOf(name);
-        if (!id || map.has(id)) continue;
-        if (!pass && name !== `${id}.md`) continue;
-        map.set(id, name);
-      }
-    }
-    noteFiles = map;
+    const relPaths = await walkMarkdown(
+      async (dir: string) => (await host.listDir(dir)).entries,
+      notesDir(),
+    );
+    noteFiles = indexNotes(relPaths);
   } catch {
     // Missing folder (or denied) simply means no notes yet.
     noteFiles = new Map();
   }
 };
 
-const noteTemplate = (task: ClickUpTask, body: string): string => {
-  const url = task.url || `${DEFAULT_ORIGIN}/t/${task.id}`;
-  const label = task.custom_id || task.id;
-  const meta = [sprintLabel(task, frenteFolder(), sprintField()), task.status?.status, task.list?.name]
-    .filter(Boolean)
-    .join(" · ");
-  return `[${label}](${url})${meta ? ` · ${meta}` : ""}\n\n---\n\n${body}`;
+/** Ensure the generated Bases view exists (once per session). */
+let baseEnsured = false;
+
+const ensureBaseFile = async (): Promise<void> => {
+  if (baseEnsured) return;
+  baseEnsured = true;
+  const path = `${notesDir()}/${BASE_FILENAME}`;
+  try {
+    await host.readFile(path);
+  } catch {
+    try {
+      await host.writeFile(path, baseFileContent());
+    } catch {
+      // Best-effort; the user can recreate it from the docs.
+    }
+  }
 };
+
+const noteTemplate = (task: ClickUpTask, body: string): string =>
+  serializeNote(noteMetaOf(task), noteLinkLine(task), body);
 
 /** One-time move of pre-file notes (`note:<id>` storage keys) into the vault. */
 const migrateStorageNotes = async (): Promise<void> => {
@@ -497,9 +496,9 @@ const migrateStorageNotes = async (): Promise<void> => {
       const value = await host.storage.get(key);
       if (typeof value === "string" && value && !noteFiles.has(taskId)) {
         const task = state.tasks.find((entry) => entry.id === taskId);
-        const name = task ? expectedFileName(task) : `${taskId}.md`;
-        await host.writeFile(`${notesDir()}/${name}`, task ? noteTemplate(task, value) : value);
-        noteFiles.set(taskId, name);
+        const rel = task ? canonicalFor(task) : `${taskId}.md`;
+        await host.writeFile(`${notesDir()}/${rel}`, task ? noteTemplate(task, value) : value);
+        noteFiles.set(taskId, rel);
         syncNoteButton(taskId);
       }
       await host.storage.delete(key);
@@ -521,7 +520,7 @@ const openInObsidian = (task: ClickUpTask): void => {
       name = noteFiles.get(task.id) ?? null;
     }
     if (!name) {
-      name = expectedFileName(task);
+      name = canonicalFor(task);
       try {
         await host.writeFile(`${notesDir()}/${name}`, noteTemplate(task, ""));
       } catch (error) {
@@ -906,6 +905,7 @@ const load = async (force: boolean): Promise<void> => {
     }
     await readDone();
     await readNoteFiles();
+    await ensureBaseFile();
     await readEvents();
     lastUpdated = await readUpdated();
     await ensureContext();
